@@ -12,8 +12,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **BROK-01**: System authenticates with tastytrade via OAuth2 and manages session tokens
 - [x] **BROK-02**: System fetches live account balance and buying power at cycle start
 - [x] **BROK-03**: System syncs live positions from tastytrade as source of truth
-- [ ] **BROK-04**: System places limit orders with dry_run validation before submission
-- [ ] **BROK-05**: System files companion GTC stop orders on every new buy for overnight protection
+- [x] **BROK-04**: System places limit orders with dry_run validation before submission
+- [x] **BROK-05**: System files companion GTC stop orders on every new buy for overnight protection
 
 ### AI Decision
 
@@ -82,8 +82,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BROK-01 | Phase 1 | Complete |
 | BROK-02 | Phase 1 | Complete |
 | BROK-03 | Phase 1 | Complete |
-| BROK-04 | Phase 2 | Pending |
-| BROK-05 | Phase 2 | Pending |
+| BROK-04 | Phase 2 | Complete |
+| BROK-05 | Phase 2 | Complete |
 | AIDC-01 | Phase 2 | Complete |
 | AIDC-02 | Phase 2 | Complete |
 | AIDC-03 | Phase 2 | Complete |

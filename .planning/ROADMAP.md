@@ -13,7 +13,7 @@ A brownfield upgrade of a proven 11-week simulation into a fully autonomous live
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - SQLite state store, proven OAuth2 auth, read-only brokerage sync, and dev environment (completed 2026-03-19)
-- [ ] **Phase 2: Execution and Intelligence** - Live order execution, multi-LLM consensus engine, and position sizing
+- [x] **Phase 2: Execution and Intelligence** - Live order execution, multi-LLM consensus engine, and position sizing (completed 2026-03-19)
 - [ ] **Phase 3: Autonomous Operations** - Daily trading cycle, circuit breakers, stop-loss enforcement, and structured logging
 - [ ] **Phase 4: Hardening** - End-to-end dry-run test suite, operational validation, and system confidence
 - [ ] **Phase 5: Tuning** - Evidence-based threshold and prompt refinement from live run data
@@ -109,7 +109,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-03-19 |
-| 2. Execution and Intelligence | 2/3 | In Progress|  |
+| 2. Execution and Intelligence | 3/3 | Complete   | 2026-03-19 |
 | 3. Autonomous Operations | 0/3 | Not started | - |
 | 4. Hardening | 0/2 | Not started | - |
 | 5. Tuning | 0/2 | Not started | - |
