@@ -79,35 +79,35 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BROK-01 | — | Pending |
-| BROK-02 | — | Pending |
-| BROK-03 | — | Pending |
-| BROK-04 | — | Pending |
-| BROK-05 | — | Pending |
-| AIDC-01 | — | Pending |
-| AIDC-02 | — | Pending |
-| AIDC-03 | — | Pending |
-| AIDC-04 | — | Pending |
-| OPER-01 | — | Pending |
-| OPER-02 | — | Pending |
-| OPER-03 | — | Pending |
-| OPER-04 | — | Pending |
-| OPER-05 | — | Pending |
-| SIZE-01 | — | Pending |
-| SIZE-02 | — | Pending |
-| SIZE-03 | — | Pending |
-| SIZE-04 | — | Pending |
-| LOGS-01 | — | Pending |
-| INFR-01 | — | Pending |
-| INFR-02 | — | Pending |
-| INFR-03 | — | Pending |
-| INFR-04 | — | Pending |
+| BROK-01 | Phase 1 | Pending |
+| BROK-02 | Phase 1 | Pending |
+| BROK-03 | Phase 1 | Pending |
+| BROK-04 | Phase 2 | Pending |
+| BROK-05 | Phase 2 | Pending |
+| AIDC-01 | Phase 2 | Pending |
+| AIDC-02 | Phase 2 | Pending |
+| AIDC-03 | Phase 2 | Pending |
+| AIDC-04 | Phase 2 | Pending |
+| OPER-01 | Phase 3 | Pending |
+| OPER-02 | Phase 3 | Pending |
+| OPER-03 | Phase 3 | Pending |
+| OPER-04 | Phase 3 | Pending |
+| OPER-05 | Phase 3 | Pending |
+| SIZE-01 | Phase 2 | Pending |
+| SIZE-02 | Phase 2 | Pending |
+| SIZE-03 | Phase 2 | Pending |
+| SIZE-04 | Phase 2 | Pending |
+| LOGS-01 | Phase 3 | Pending |
+| INFR-01 | Phase 1 | Pending |
+| INFR-02 | Phase 1 | Pending |
+| INFR-03 | Phase 1 | Pending |
+| INFR-04 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 23 total
-- Mapped to phases: 0
-- Unmapped: 23 ⚠️
+- Mapped to phases: 23
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-19*
-*Last updated: 2026-03-19 after initial definition*
+*Last updated: 2026-03-19 after roadmap creation*
