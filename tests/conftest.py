@@ -241,6 +241,8 @@ def e2e_db(monkeypatch):
     monkeypatch.setattr("src.consensus.get_db", _get_db)
     monkeypatch.setattr("src.pdt.get_db", _get_db)
     monkeypatch.setattr("src.stoploss.get_db", _get_db)
+    monkeypatch.setattr("src.watchlist.get_db", _get_db)
+    monkeypatch.setattr("src.screener.get_db", _get_db)
 
     yield wrapper
     conn.close()
