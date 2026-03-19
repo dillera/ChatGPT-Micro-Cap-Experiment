@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float = 0.10    # OPER-03: halt if daily loss > 10%
     max_drawdown_pct: float = 0.30      # OPER-04: halt if drawdown > 30% from ATH
 
+    # Screener settings (Phase 6)
+    screener_sectors: list[str] = ["biotech", "tech"]
+    screener_max_market_cap: float = 300_000_000  # $300M
+    screener_min_volume: int = 10_000             # 10K avg daily volume
+    screener_cache_hours: int = 24                # Cache TTL
+    screener_max_results_per_sector: int = 20     # Cap results
+
     # Runtime flags
     dry_run: bool = False
 
