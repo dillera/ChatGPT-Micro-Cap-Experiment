@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     consensus_max_tokens: int = 2000
     min_confidence: float = 0.6
 
+    # Circuit breaker thresholds (Phase 3)
+    max_daily_loss_pct: float = 0.10    # OPER-03: halt if daily loss > 10%
+    max_drawdown_pct: float = 0.30      # OPER-04: halt if drawdown > 30% from ATH
+
     # Runtime flags
     dry_run: bool = False
 
