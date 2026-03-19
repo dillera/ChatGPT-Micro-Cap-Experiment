@@ -22,11 +22,19 @@ The system must autonomously generate profitable trades on a small tastytrade ac
 - ✓ Trade logging and LLM response audit trail — existing
 - ✓ Weekend/holiday date handling for trading calendars — existing
 
+<!-- Validated in Phase 1: Foundation -->
+
+- ✓ SQLite state store replacing CSV as single source of truth — Phase 1
+- ✓ tastytrade OAuth2 authentication with session caching — Phase 1
+- ✓ Live positions sync from tastytrade account — Phase 1
+- ✓ Live account balance and buying power retrieval — Phase 1
+- ✓ OTC/penny stock ticker validation — Phase 1
+- ✓ PDT day-trade counter (max 3 per 5 days) — Phase 1
+- ✓ --dry-run mode for safe testing — Phase 1
+
 ### Active
 
-- [ ] tastytrade API integration (authentication, session management)
-- [ ] Live positions sync from tastytrade account
-- [ ] Real-time account balance and buying power retrieval
+- [ ] Programmatic order execution (market and limit orders) via tastytrade
 - [ ] Programmatic order execution (market and limit orders) via tastytrade
 - [ ] Claude API integration as second LLM for consensus decisions
 - [ ] Multi-LLM consensus engine (GPT-4 + Claude agreement required)
@@ -66,11 +74,11 @@ Current portfolio focuses on biotech catalysts (FDA decisions, Phase 3 trials) w
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Full rebuild over incremental upgrade | Current CSV-based workflow doesn't support live trading; need clean architecture | — Pending |
+| Full rebuild over incremental upgrade | Current CSV-based workflow doesn't support live trading; need clean architecture | ✓ Good |
 | Multi-LLM consensus (GPT-4 + Claude) | Reduces single-model bias; higher confidence when both agree | — Pending |
 | Aggressive position sizing (up to 50%) | Small account needs concentrated bets to generate meaningful returns | — Pending |
 | Daily cycle (not intraday) | Micro-cap catalysts play out over days/weeks, not minutes | — Pending |
 | tastytrade over other brokers | User's existing account; strong API; low commissions | — Pending |
 
 ---
-*Last updated: 2026-03-19 after initialization*
+*Last updated: 2026-03-19 after Phase 1 completion*
