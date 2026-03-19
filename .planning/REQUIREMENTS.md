@@ -55,10 +55,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Dashboard
 
-- [ ] **DASH-01**: Streamlit app displays current portfolio positions with P&L at localhost:8501
-- [ ] **DASH-02**: User can add/remove watchlist tickers via the UI with immediate SQLite persistence
+- [x] **DASH-01**: Streamlit app displays current portfolio positions with P&L at localhost:8501
+- [x] **DASH-02**: User can add/remove watchlist tickers via the UI with immediate SQLite persistence
 - [ ] **DASH-03**: Run log history is browsable with expandable detail per cycle
-- [ ] **DASH-04**: Circuit breaker status visible with manual reset button
+- [x] **DASH-04**: Circuit breaker status visible with manual reset button
 - [ ] **DASH-05**: Sector screener results displayed and addable to watchlist with one click
 
 ## v2 Requirements
