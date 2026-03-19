@@ -43,7 +43,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **INFR-01**: SQLite database replaces CSV files as primary state store
 - [ ] **INFR-02**: OTC/penny stock ticker validation before any order attempt
 - [ ] **INFR-03**: PDT day-trade counter prevents account lockout (max 3 day trades per 5 days)
-- [ ] **INFR-04**: System supports --dry-run flag for full cycle without order submission
+- [x] **INFR-04**: System supports --dry-run flag for full cycle without order submission
 
 ## v2 Requirements
 
@@ -101,7 +101,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INFR-01 | Phase 1 | Pending |
 | INFR-02 | Phase 1 | Pending |
 | INFR-03 | Phase 1 | Pending |
-| INFR-04 | Phase 1 | Pending |
+| INFR-04 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 23 total
