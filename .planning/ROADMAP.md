@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. OAuth2 authentication succeeds and session tokens auto-refresh without manual intervention
   4. OTC tickers are rejected at the screening stage before any API call is attempted
   5. PDT day-trade counter reads from SQLite and enforces the 3-trade-per-5-days limit at startup
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
 - [ ] 01-01: Set up project structure, pyproject.toml, uv lockfile, pydantic-settings config, and loguru logging
