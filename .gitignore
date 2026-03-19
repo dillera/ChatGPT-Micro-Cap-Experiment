@@ -1,1 +1,22 @@
 CLAUDE.md
+
+# uv
+.venv/
+
+# Environment
+.env
+
+# SQLite
+data/*.db
+data/*.db-journal
+data/*.db-wal
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
