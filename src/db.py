@@ -90,6 +90,28 @@ CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
 CREATE INDEX IF NOT EXISTS idx_trades_executed_at ON trades(executed_at);
 CREATE INDEX IF NOT EXISTS idx_daily_snapshots_date ON daily_snapshots(snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_day_trade_counter_date ON day_trade_counter(traded_at);
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol    TEXT NOT NULL,
+    notes     TEXT,
+    added_at  TEXT NOT NULL,
+    active    INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_symbol ON watchlist(symbol);
+
+CREATE TABLE IF NOT EXISTS screener_cache (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    sector      TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    market_cap  REAL,
+    avg_volume  REAL,
+    exchange    TEXT,
+    cached_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_screener_cache_sector ON screener_cache(sector);
 """
 
 

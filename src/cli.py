@@ -4,6 +4,9 @@ Run with:
   python -m src --dry-run        # Full cycle, no real orders
   python -m src                  # Full autonomous cycle
   python -m src --sync-only      # Only sync positions from tastytrade
+  python -m src watchlist add ABEO   # Add ticker to watchlist
+  python -m src watchlist remove ABEO # Remove ticker from watchlist
+  python -m src watchlist list       # List active watchlist tickers
 """
 from __future__ import annotations
 
@@ -17,12 +20,46 @@ from src.db import init_db
 from src.logger import setup_logging
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Micro-Cap AI Trading Bot")
-    parser.add_argument("--dry-run", action="store_true", help="Run full cycle without placing orders")
-    parser.add_argument("--sync-only", action="store_true", help="Only sync positions, do not trade")
-    args = parser.parse_args()
+def _handle_watchlist_add(args: argparse.Namespace) -> None:
+    """Handle `watchlist add` subcommand."""
+    init_db()
+    from src.watchlist import add_ticker
 
+    result = add_ticker(args.ticker, notes=args.notes)
+    if result:
+        print(f"Added {args.ticker.upper()} to watchlist.")
+    else:
+        print(f"{args.ticker.upper()} is already on the watchlist.")
+
+
+def _handle_watchlist_remove(args: argparse.Namespace) -> None:
+    """Handle `watchlist remove` subcommand."""
+    init_db()
+    from src.watchlist import remove_ticker
+
+    result = remove_ticker(args.ticker)
+    if result:
+        print(f"Removed {args.ticker.upper()} from watchlist.")
+    else:
+        print(f"{args.ticker.upper()} is not on the watchlist.")
+
+
+def _handle_watchlist_list(args: argparse.Namespace) -> None:
+    """Handle `watchlist list` subcommand."""
+    init_db()
+    from src.watchlist import list_tickers
+
+    tickers = list_tickers()
+    if tickers:
+        print("Active watchlist tickers:")
+        for t in tickers:
+            print(f"  {t}")
+    else:
+        print("Watchlist is empty.")
+
+
+def _handle_run(args: argparse.Namespace) -> None:
+    """Handle the default run behavior (trading cycle)."""
     settings = get_settings()
     if args.dry_run:
         settings.dry_run = True
@@ -58,6 +95,45 @@ def main() -> None:
     else:
         logger.error("Cycle failed: {} ({})", status, result.get("reason", ""))
         sys.exit(1)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Micro-Cap AI Trading Bot")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # --- watchlist subcommand ---
+    watchlist_parser = subparsers.add_parser("watchlist", help="Manage watchlist tickers")
+    watchlist_sub = watchlist_parser.add_subparsers(dest="watchlist_action")
+
+    add_parser = watchlist_sub.add_parser("add", help="Add a ticker to the watchlist")
+    add_parser.add_argument("ticker", type=str, help="Ticker symbol to add")
+    add_parser.add_argument("--notes", type=str, default=None, help="Optional notes")
+    add_parser.set_defaults(func=_handle_watchlist_add)
+
+    remove_parser = watchlist_sub.add_parser("remove", help="Remove a ticker from the watchlist")
+    remove_parser.add_argument("ticker", type=str, help="Ticker symbol to remove")
+    remove_parser.set_defaults(func=_handle_watchlist_remove)
+
+    list_parser = watchlist_sub.add_parser("list", help="List active watchlist tickers")
+    list_parser.set_defaults(func=_handle_watchlist_list)
+
+    # --- default run behavior (backward compatible) ---
+    # When no subcommand is given, treat as trading cycle run
+    parser.add_argument("--dry-run", action="store_true", help="Run full cycle without placing orders")
+    parser.add_argument("--sync-only", action="store_true", help="Only sync positions, do not trade")
+
+    args = parser.parse_args()
+
+    if args.command == "watchlist":
+        if hasattr(args, "func"):
+            args.func(args)
+        else:
+            watchlist_parser.print_help()
+    elif args.command is None:
+        # No subcommand = trading cycle (backward compatible)
+        _handle_run(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
