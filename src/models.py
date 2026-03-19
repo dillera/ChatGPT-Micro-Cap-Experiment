@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 
 @dataclass
@@ -58,3 +61,37 @@ class DayTradeRecord:
     symbol: str
     traded_at: str             # YYYY-MM-DD
     id: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models for LLM structured output (Phase 2 consensus engine)
+# ---------------------------------------------------------------------------
+
+
+class TradeRecommendation(BaseModel):
+    """Schema for LLM trading response. Used with native structured output."""
+
+    action: Literal["BUY", "SELL", "HOLD"]
+    symbol: str = Field(description="Ticker symbol, e.g. RXRX")
+    confidence: float = Field(ge=0.0, le=1.0, description="0.0-1.0 conviction level")
+    stop_loss_pct: float = Field(
+        ge=0.01, le=0.50, description="Stop loss as % below entry"
+    )
+    reasoning: str = Field(max_length=500, description="2-3 sentence rationale")
+
+
+class TradingAnalysis(BaseModel):
+    """Top-level response schema for each LLM."""
+
+    market_assessment: str = Field(max_length=300)
+    recommendations: list[TradeRecommendation]
+
+
+class ConsensusResult(BaseModel):
+    """Output of the consensus engine for downstream consumers."""
+
+    approved_trades: list[TradeRecommendation]
+    bull_analysis: TradingAnalysis
+    bear_analysis: TradingAnalysis
+    all_symbols_seen: list[str]
+    disagreed_symbols: list[str]
