@@ -24,8 +24,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Operations
 
-- [ ] **OPER-01**: System runs complete daily trading cycle without human trigger
-- [ ] **OPER-02**: System checks stop-losses against live positions before LLM calls
+- [x] **OPER-01**: System runs complete daily trading cycle without human trigger
+- [x] **OPER-02**: System checks stop-losses against live positions before LLM calls
 - [x] **OPER-03**: Circuit breaker halts trading if daily loss exceeds 10% of opening balance
 - [x] **OPER-04**: Circuit breaker halts trading if drawdown exceeds 30% from all-time high
 - [x] **OPER-05**: Tripped circuit breakers require manual override to resume
@@ -88,8 +88,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AIDC-02 | Phase 2 | Complete |
 | AIDC-03 | Phase 2 | Complete |
 | AIDC-04 | Phase 2 | Complete |
-| OPER-01 | Phase 3 | Pending |
-| OPER-02 | Phase 3 | Pending |
+| OPER-01 | Phase 3 | Complete |
+| OPER-02 | Phase 3 | Complete |
 | OPER-03 | Phase 3 | Complete |
 | OPER-04 | Phase 3 | Complete |
 | OPER-05 | Phase 3 | Complete |
