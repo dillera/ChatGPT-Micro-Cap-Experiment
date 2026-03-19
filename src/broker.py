@@ -242,6 +242,56 @@ class TastytradeClient:
             "dry_run": dry_run,
         }
 
+    def place_sell_order(
+        self,
+        ticker: str,
+        shares: int,
+        limit_price: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a simple limit sell order (DAY).
+
+        Returns order response dict.
+        """
+        return self._run(
+            self._async_place_sell(ticker, shares, limit_price, dry_run)
+        )
+
+    async def _async_place_sell(
+        self,
+        ticker: str,
+        shares: int,
+        limit_price: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Equity
+        from tastytrade.order import (
+            NewOrder,
+            OrderAction,
+            OrderType,
+            OrderTimeInForce,
+        )
+
+        symbol = await Equity.get(self._session, ticker)
+        leg = symbol.build_leg(Decimal(str(shares)), OrderAction.SELL_TO_CLOSE)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[leg],
+            price=limit_price,  # positive = credit (sell)
+        )
+        response = await self._account.place_order(
+            self._session, order, dry_run=dry_run
+        )
+        return {
+            "order_response": response,
+            "ticker": ticker,
+            "shares": shares,
+            "limit_price": float(limit_price),
+            "dry_run": dry_run,
+        }
+
     def sync_positions_to_db(self, snapshot: AccountSnapshot) -> int:
         """Write live positions to SQLite, replacing existing rows. Returns count synced."""
         conn = get_db()

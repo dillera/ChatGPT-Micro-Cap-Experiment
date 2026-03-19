@@ -103,20 +103,38 @@ def check_and_enforce_stops(
                         "status": "dry_run",
                     })
                 else:
-                    # TODO: Add a simple sell method to broker.py (Phase 4).
-                    # place_otoco_order is for opening positions, not closing.
-                    # For now, log the need and mark as needing the sell method.
-                    logger.warning(
-                        "LIVE: Stop-loss sell needed for {} but simple sell "
-                        "method not yet implemented. Recorded to trades table.",
-                        symbol,
-                    )
-                    results.append({
-                        "symbol": symbol,
-                        "trigger_price": mid,
-                        "stop_loss": stop_level,
-                        "status": "needs_sell_method",
-                    })
+                    # Place a real sell order via broker
+                    from decimal import Decimal
+                    try:
+                        sell_result = client.place_sell_order(
+                            ticker=symbol,
+                            shares=int(pos["shares"]),
+                            limit_price=Decimal(str(round(bid, 2))),
+                            dry_run=False,
+                        )
+                        logger.info(
+                            "LIVE: Stop-loss sell placed for {} ({} shares at ${:.2f})",
+                            symbol, int(pos["shares"]), bid,
+                        )
+                        results.append({
+                            "symbol": symbol,
+                            "trigger_price": mid,
+                            "stop_loss": stop_level,
+                            "status": "sold",
+                            "order": sell_result,
+                        })
+                    except Exception as e:
+                        logger.error(
+                            "LIVE: Stop-loss sell FAILED for {}: {}",
+                            symbol, e,
+                        )
+                        results.append({
+                            "symbol": symbol,
+                            "trigger_price": mid,
+                            "stop_loss": stop_level,
+                            "status": "sell_failed",
+                            "error": str(e),
+                        })
             else:
                 logger.debug(
                     "{}: price ${:.2f} > stop ${:.2f} -- safe",
