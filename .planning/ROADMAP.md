@@ -81,11 +81,11 @@ Plans:
   2. A simulated JSON parse failure from either LLM aborts the cycle cleanly with an error log entry rather than defaulting to single-model execution
   3. A simulated circuit breaker trip in dry-run produces the correct halt behavior and requires a manual flag to resume
   4. The dry-run output log contains enough detail to verify every decision the system would have made
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Implement end-to-end dry-run test harness covering all seven pipeline stages with injected failure scenarios
-- [ ] 04-02: Validate all critical pitfall mitigations (OAuth2 path, OTC filter, PDT counter, spread check, parse failure abort, circuit breaker manual reset)
+- [ ] 04-01-PLAN.md — End-to-end dry-run test harness (12 tests covering all 11 pipeline stages with failure injection: happy path, LLM failure, CB halt, weekend skip, lockfile, run log verification, stop-loss, post-trade CB trip)
+- [ ] 04-02-PLAN.md — Pitfall mitigation validation (25+ tests proving OTC filter, OAuth2 path, PDT counter, spread check, consensus veto, parse failure abort, circuit breaker states, position sizing guards)
 
 ### Phase 5: Tuning
 **Goal**: After real trading runs accumulate data, the system's consensus thresholds, position sizing tiers, and prompt quality are refined based on observed behavior — not speculation
