@@ -7,11 +7,16 @@ breaker status with manual reset capability.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
 from src.config import get_settings
-from src.db import init_db
+from src.db import get_db, init_db
+from src.run_logger import RUN_LOG_DIR
+from src.screener import screen_sector
 from src.watchlist import add_ticker, remove_ticker, list_tickers
 from src.circuit_breaker import get_cb_status
 from src.dashboard_helpers import (
@@ -118,3 +123,93 @@ if cb.status != "ACTIVE":
     if st.button("Reset Circuit Breaker"):
         reset_circuit_breaker()
         st.rerun()
+
+# ---------------------------------------------------------------------------
+# Run Log History (DASH-03)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("Run Log History")
+
+if RUN_LOG_DIR.exists():
+    log_files = sorted(RUN_LOG_DIR.glob("cycle_*.json"), reverse=True)[:50]
+else:
+    log_files = []
+
+if not log_files:
+    st.info("No run logs found. Run a trading cycle to generate logs.")
+else:
+    for log_file in log_files:
+        try:
+            log_data = json.loads(log_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        status = log_data.get("status", "unknown")
+        dry_run = log_data.get("dry_run", False)
+        label = f"{log_file.stem} - {status}"
+        if dry_run:
+            label += " (dry run)"
+        with st.expander(label):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Status", status)
+            c2.metric("Dry Run", str(dry_run))
+            account = log_data.get("account") or {}
+            c3.metric("NLV", f"${account.get('nlv', 0):,.2f}")
+            snapshot = log_data.get("daily_snapshot") or {}
+            c4.metric("Daily P&L", f"${snapshot.get('pnl', 0):,.2f}")
+            st.json(log_data)
+
+# ---------------------------------------------------------------------------
+# Sector Screener (DASH-05)
+# ---------------------------------------------------------------------------
+st.divider()
+st.subheader("Sector Screener")
+
+watchlist_set = set(list_tickers())
+
+for sector in settings.screener_sectors:
+    st.markdown(f"**{sector.title()}**")
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT symbol, market_cap, avg_volume, exchange, cached_at "
+            "FROM screener_cache WHERE sector = ? ORDER BY symbol",
+            (sector,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        st.caption(
+            f"No cached results for {sector}. Run screener via CLI: "
+            f"python -m src.cli screener --sector {sector}"
+        )
+    else:
+        table_data = []
+        for row in rows:
+            table_data.append(
+                {
+                    "Symbol": row["symbol"],
+                    "Market Cap": f"${row['market_cap']:,.0f}" if row["market_cap"] else "N/A",
+                    "Avg Volume": f"{row['avg_volume']:,.0f}" if row["avg_volume"] else "N/A",
+                    "Exchange": row["exchange"] or "N/A",
+                    "Cached At": row["cached_at"] or "N/A",
+                }
+            )
+        st.dataframe(pd.DataFrame(table_data), use_container_width=True, hide_index=True)
+
+        for row in rows:
+            sym = row["symbol"]
+            if sym in watchlist_set:
+                st.caption(f"{sym} -- Already in watchlist")
+            else:
+                if st.button(f"Add {sym}", key=f"screener_add_{sector}_{sym}"):
+                    add_ticker(sym, notes=f"From {sector} screener")
+                    st.rerun()
+
+if st.button("Refresh Screener"):
+    try:
+        for sector in settings.screener_sectors:
+            screen_sector(sector)
+        st.rerun()
+    except Exception as e:
+        st.error(f"Screener refresh failed: {e}")
