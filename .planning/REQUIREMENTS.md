@@ -47,10 +47,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Watchlist & Screening
 
-- [ ] **WATCH-01**: User can add/remove tickers to a persistent watchlist via CLI or API
-- [ ] **WATCH-02**: System screens for micro-cap stocks matching sector criteria (biotech, tech) with market cap and volume filters
+- [x] **WATCH-01**: User can add/remove tickers to a persistent watchlist via CLI or API
+- [x] **WATCH-02**: System screens for micro-cap stocks matching sector criteria (biotech, tech) with market cap and volume filters
 - [ ] **WATCH-03**: LLMs propose new ticker candidates based on market conditions and portfolio gaps
-- [ ] **WATCH-04**: Candidate tickers are validated (OTC filter, exchange check) before entering the consensus pipeline
+- [x] **WATCH-04**: Candidate tickers are validated (OTC filter, exchange check) before entering the consensus pipeline
 - [ ] **WATCH-05**: Daily cycle pulls candidates from watchlist + screener + LLM proposals and runs consensus on each
 
 ### Dashboard

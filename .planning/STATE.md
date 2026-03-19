@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 04-02-PLAN.md (pitfall mitigation validation)
-last_updated: "2026-03-19T15:48:03.390Z"
+stopped_at: Completed 06-01-PLAN.md (watchlist and screener)
+last_updated: "2026-03-19T16:06:19Z"
 progress:
-  total_phases: 5
+  total_phases: 7
   completed_phases: 4
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 13
+  completed_plans: 12
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-19)
 
 **Core value:** Autonomously generate profitable trades on a small tastytrade account with aggressive but controlled risk management — every trade placed, every stop-loss enforced, every decision logged
-**Current focus:** Phase 04 — hardening
+**Current focus:** Phase 06 — watchlist-and-screening
 
 ## Current Position
 
-Phase: 04 (hardening) — COMPLETE
-Plan: 2 of 2 (all plans complete)
+Phase: 06 (watchlist-and-screening) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Plan: 2 of 2 (all plans complete)
 | Phase 03 P03 | 2min | 2 tasks | 4 files |
 | Phase 04 P02 | 3min | 2 tasks | 2 files |
 | Phase 04 P01 | 3min | 2 tasks | 2 files |
+| Phase 06 P01 | 3min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,10 @@ Recent decisions affecting current work:
 - [Phase 04]: Fixed case-insensitive exchange comparison bug (frozenset entries normalized to uppercase)
 - [Phase 04]: All module get_db references patched via monkeypatch for true in-memory DB sharing in E2E tests
 - [Phase 04]: E2E tests exercise real production code paths with mocked externals for maximum confidence
+- [Phase 06]: Subcommand-based argparse: no subcommand = trading cycle (backward compatible)
+- [Phase 06]: Soft-delete for watchlist (active=0) preserves audit trail
+- [Phase 06]: Screener cache TTL in SQLite: avoids repeated yfinance API calls within 24h
+- [Phase 06]: _fetch_sector_tickers as internal function enables clean test mocking without touching yfinance
 
 ### Pending Todos
 
@@ -110,6 +115,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T15:45:07Z
-Stopped at: Completed 04-02-PLAN.md (pitfall mitigation validation)
+Last session: 2026-03-19T16:06:19Z
+Stopped at: Completed 06-01-PLAN.md (watchlist and screener)
 Resume file: None
