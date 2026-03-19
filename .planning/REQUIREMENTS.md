@@ -40,9 +40,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Infrastructure
 
-- [ ] **INFR-01**: SQLite database replaces CSV files as primary state store
+- [x] **INFR-01**: SQLite database replaces CSV files as primary state store
 - [ ] **INFR-02**: OTC/penny stock ticker validation before any order attempt
-- [ ] **INFR-03**: PDT day-trade counter prevents account lockout (max 3 day trades per 5 days)
+- [x] **INFR-03**: PDT day-trade counter prevents account lockout (max 3 day trades per 5 days)
 - [x] **INFR-04**: System supports --dry-run flag for full cycle without order submission
 
 ## v2 Requirements
@@ -98,9 +98,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SIZE-03 | Phase 2 | Pending |
 | SIZE-04 | Phase 2 | Pending |
 | LOGS-01 | Phase 3 | Pending |
-| INFR-01 | Phase 1 | Pending |
+| INFR-01 | Phase 1 | Complete |
 | INFR-02 | Phase 1 | Pending |
-| INFR-03 | Phase 1 | Pending |
+| INFR-03 | Phase 1 | Complete |
 | INFR-04 | Phase 1 | Complete |
 
 **Coverage:**
