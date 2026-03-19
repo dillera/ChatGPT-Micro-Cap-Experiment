@@ -9,16 +9,18 @@ from __future__ import annotations
 from loguru import logger
 
 # Major US exchanges that tastytrade supports for equity orders
+# All entries stored in UPPERCASE for case-insensitive comparison
 VALID_EXCHANGES = frozenset({
-    "NYSE", "NASDAQ", "NYSE ARCA", "NYSE American",
+    "NYSE", "NASDAQ", "NYSE ARCA", "NYSE AMERICAN",
     "BATS", "CBOE", "IEX",
     # Alias forms sometimes returned by data providers
     "NYQ", "NMS", "NCM", "NGM", "PCX", "BTS",
 })
 
 # Known OTC/pink sheet exchange identifiers to explicitly reject
+# All entries stored in UPPERCASE for case-insensitive comparison
 OTC_EXCHANGES = frozenset({
-    "OTC", "OTCBB", "PINK", "OTC Markets", "Other OTC",
+    "OTC", "OTCBB", "PINK", "OTC MARKETS", "OTHER OTC",
     "PNK", "GREY",
 })
 
