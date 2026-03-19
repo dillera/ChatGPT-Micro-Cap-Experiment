@@ -33,9 +33,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: Set up project structure, pyproject.toml, uv lockfile, pydantic-settings config, and loguru logging
-- [ ] 01-02: Implement SQLite state store (schema: positions, run_log, circuit_breaker, day_trade_counter) and migrate existing CSV data
-- [ ] 01-03: Implement tastytrade OAuth2 client (auth, session lifecycle, auto-refresh) and read-only account/position sync
+- [x] 01-01: Set up project structure, pyproject.toml, uv lockfile, pydantic-settings config, and loguru logging
+- [x] 01-02: Implement SQLite state store (schema: positions, run_log, circuit_breaker, day_trade_counter) and migrate existing CSV data
+- [x] 01-03: Implement tastytrade OAuth2 client (auth, session lifecycle, auto-refresh) and read-only account/position sync
 
 ### Phase 2: Execution and Intelligence
 **Goal**: The system can query both LLMs for a consensus decision, size the position correctly, and place a validated limit order — the core capability that removes the human from the loop
@@ -48,12 +48,12 @@ Plans:
   4. A confidence below 0.6 from either model produces a HOLD — not a trade
   5. Every new buy triggers a companion GTC stop order filed on tastytrade before the cycle ends
   6. Position size is computed from confidence score and buying power — high conviction (>= 0.75) uses up to 40%, normal (>= 0.6) uses up to 20%, no trade below $50
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: Implement multi-LLM consensus engine (PromptBuilder, OpenAI client, Anthropic client, Pydantic response validation, ConsensusMatcher)
-- [ ] 02-02: Implement order execution layer (limit orders only, dry_run pre-flight, spread check gate, symbol hallucination validation, GTC stop companion order)
-- [ ] 02-03: Implement position sizing module (confidence-tiered formula, minimum trade guard, buying power integration)
+- [ ] 02-01-PLAN.md — Multi-LLM consensus engine (Pydantic schemas, bull/bear prompts, OpenAI + Anthropic structured output, veto consensus logic, SQLite audit logging)
+- [ ] 02-02-PLAN.md — Position sizing module (confidence-tiered formula, $50 minimum guard, whole-share rounding, buying power integration)
+- [ ] 02-03-PLAN.md — Order execution layer (spread check gate, OTC filter, PDT guard, OTOCO limit+stop orders, dry_run validation, trade recording)
 
 ### Phase 3: Autonomous Operations
 **Goal**: A single cron trigger fires the complete trading cycle each market day — circuit breakers halt trading when risk limits are breached, stop-losses enforce against live positions, and every cycle produces a structured log
