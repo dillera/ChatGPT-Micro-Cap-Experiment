@@ -23,10 +23,36 @@ def mock_settings(monkeypatch):
     return s
 
 
+class _NonClosingConnection:
+    """Wrapper that delegates all sqlite3.Connection methods but ignores close().
+
+    This allows test fixtures to remain open for assertions after production
+    code calls conn.close().
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def close(self):
+        """No-op -- keeps the connection open for test assertions."""
+        pass
+
+    def real_close(self):
+        """Actually close the underlying connection."""
+        self._conn.close()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 @pytest.fixture()
 def test_db():
-    """Create an in-memory SQLite DB initialized with the full schema."""
-    from src.db import get_db, SCHEMA_SQL
+    """Create an in-memory SQLite DB initialized with the full schema.
+
+    Returns a wrapper that ignores close() so tests can assert after
+    production code calls conn.close().
+    """
+    from src.db import SCHEMA_SQL
 
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -37,7 +63,9 @@ def test_db():
         "INSERT OR IGNORE INTO circuit_breaker (id, status) VALUES (1, 'ACTIVE')"
     )
     conn.commit()
-    return conn
+    wrapper = _NonClosingConnection(conn)
+    yield wrapper
+    conn.close()
 
 
 @pytest.fixture()

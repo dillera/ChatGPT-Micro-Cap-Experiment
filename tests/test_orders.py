@@ -70,29 +70,21 @@ class TestGetQuote:
         from src.broker import TastytradeClient
 
         client = TastytradeClient()
-        mock_quote = MagicMock()
-        mock_quote.event_symbol = "RXRX"
-        mock_quote.bid_price = 9.50
-        mock_quote.ask_price = 10.50
+        client._session = MagicMock()
 
-        async def fake_listen(*args, **kwargs):
-            yield mock_quote
+        expected_bid, expected_ask = 9.50, 10.50
+        expected_mid = (expected_bid + expected_ask) / 2
+        expected_spread = (expected_ask - expected_bid) / expected_mid
 
-        with patch("src.broker.DXLinkStreamer") as MockStreamer:
-            ctx = MagicMock()
-            MockStreamer.return_value.__aenter__ = MagicMock(return_value=ctx)
-            MockStreamer.return_value.__aexit__ = MagicMock(return_value=None)
-            ctx.listen = fake_listen
+        async def fake_async_get_quote(ticker):
+            return (expected_bid, expected_ask, expected_spread)
 
-            # We need a session for the streamer
-            client._session = MagicMock()
+        client._async_get_quote = fake_async_get_quote
 
-            bid, ask, spread = client.get_quote("RXRX")
+        bid, ask, spread = client.get_quote("RXRX")
 
-        assert bid == 9.50
-        assert ask == 10.50
-        mid = (9.50 + 10.50) / 2
-        expected_spread = (10.50 - 9.50) / mid
+        assert bid == expected_bid
+        assert ask == expected_ask
         assert abs(spread - expected_spread) < 0.001
 
 
@@ -103,48 +95,64 @@ class TestGetQuote:
 
 class TestPlaceOtocoOrder:
     def test_place_otoco_constructs_complex_order(self):
-        """place_otoco_order constructs NewComplexOrder with LIMIT trigger + GTC STOP."""
+        """place_otoco_order constructs OTOCO with negative limit price (debit)."""
         from src.broker import TastytradeClient
 
         client = TastytradeClient()
         client._session = MagicMock()
         client._account = MagicMock()
 
+        # Capture the complex order passed to place_complex_order
+        captured_orders = []
+
         mock_symbol = MagicMock()
-        mock_leg = MagicMock()
-        mock_symbol.build_leg.return_value = mock_leg
+        # build_leg must return a real Leg -- use a spec-compliant mock
+        from tastytrade.order import Leg, InstrumentType, OrderAction
+        real_leg = Leg(
+            instrument_type=InstrumentType.EQUITY,
+            symbol="RXRX",
+            action=OrderAction.BUY_TO_OPEN,
+            quantity=Decimal("100"),
+        )
+        mock_symbol.build_leg.return_value = real_leg
 
         async def fake_get(session, ticker):
             return mock_symbol
 
         async def fake_place(session, order, dry_run=True):
+            captured_orders.append(order)
             return MagicMock()
 
-        with patch("src.broker.Equity") as MockEquity:
+        with patch("tastytrade.instruments.Equity") as MockEquity:
             MockEquity.get = fake_get
             client._account.place_complex_order = fake_place
 
-            with patch("src.broker.NewComplexOrder") as MockComplex:
-                MockComplex.return_value = MagicMock()
-                result = client.place_otoco_order(
-                    "RXRX", 100, Decimal("10.00"), Decimal("8.50"), dry_run=True
-                )
+            result = client.place_otoco_order(
+                "RXRX", 100, Decimal("10.00"), Decimal("8.50"), dry_run=True
+            )
 
-                MockComplex.assert_called_once()
-                call_kwargs = MockComplex.call_args[1]
-                trigger = call_kwargs["trigger_order"]
-                assert trigger.price == Decimal("-10.00")  # negative debit
+        assert len(captured_orders) == 1
+        otoco = captured_orders[0]
+        # Trigger order has negative price (debit for buy)
+        assert otoco.trigger_order.price == Decimal("-10.00")
 
     def test_place_otoco_dry_run_true(self):
         """place_otoco_order with dry_run=True passes dry_run=True to place_complex_order."""
         from src.broker import TastytradeClient
+        from tastytrade.order import Leg, InstrumentType, OrderAction
 
         client = TastytradeClient()
         client._session = MagicMock()
         client._account = MagicMock()
 
+        real_leg = Leg(
+            instrument_type=InstrumentType.EQUITY,
+            symbol="RXRX",
+            action=OrderAction.BUY_TO_OPEN,
+            quantity=Decimal("100"),
+        )
         mock_symbol = MagicMock()
-        mock_symbol.build_leg.return_value = MagicMock()
+        mock_symbol.build_leg.return_value = real_leg
 
         calls_made = []
 
@@ -155,7 +163,7 @@ class TestPlaceOtocoOrder:
             calls_made.append(dry_run)
             return MagicMock()
 
-        with patch("src.broker.Equity") as MockEquity:
+        with patch("tastytrade.instruments.Equity") as MockEquity:
             MockEquity.get = fake_get
             client._account.place_complex_order = fake_place
 
@@ -168,39 +176,41 @@ class TestPlaceOtocoOrder:
     def test_otoco_time_in_force(self):
         """OTOCO trigger order uses DAY, dependent stop uses GTC."""
         from src.broker import TastytradeClient
+        from tastytrade.order import Leg, InstrumentType, OrderAction, OrderTimeInForce
 
         client = TastytradeClient()
         client._session = MagicMock()
         client._account = MagicMock()
 
+        real_leg = Leg(
+            instrument_type=InstrumentType.EQUITY,
+            symbol="RXRX",
+            action=OrderAction.BUY_TO_OPEN,
+            quantity=Decimal("100"),
+        )
         mock_symbol = MagicMock()
-        mock_symbol.build_leg.return_value = MagicMock()
+        mock_symbol.build_leg.return_value = real_leg
+
+        captured_orders = []
 
         async def fake_get(session, ticker):
             return mock_symbol
 
         async def fake_place(session, order, dry_run=True):
+            captured_orders.append(order)
             return MagicMock()
 
-        with patch("src.broker.Equity") as MockEquity, \
-             patch("src.broker.NewComplexOrder") as MockComplex, \
-             patch("src.broker.NewOrder") as MockNewOrder, \
-             patch("src.broker.OrderTimeInForce") as MockTIF:
-
+        with patch("tastytrade.instruments.Equity") as MockEquity:
             MockEquity.get = fake_get
-            MockComplex.return_value = MagicMock()
             client._account.place_complex_order = fake_place
 
             client.place_otoco_order(
                 "RXRX", 100, Decimal("10.00"), Decimal("8.50"), dry_run=True
             )
 
-            # NewOrder called twice: once for trigger (DAY), once for stop (GTC)
-            assert MockNewOrder.call_count == 2
-            trigger_kwargs = MockNewOrder.call_args_list[0][1]
-            stop_kwargs = MockNewOrder.call_args_list[1][1]
-            assert trigger_kwargs["time_in_force"] == MockTIF.DAY
-            assert stop_kwargs["time_in_force"] == MockTIF.GTC
+        otoco = captured_orders[0]
+        assert otoco.trigger_order.time_in_force == OrderTimeInForce.DAY
+        assert otoco.orders[0].time_in_force == OrderTimeInForce.GTC
 
 
 # ---------------------------------------------------------------------------

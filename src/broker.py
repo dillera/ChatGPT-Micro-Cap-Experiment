@@ -3,6 +3,9 @@
 Provides OAuth2 authentication, session caching, account snapshot,
 and position sync to SQLite. All async SDK calls are isolated here
 behind synchronous methods (Anti-Pattern 4 from ARCHITECTURE.md).
+
+Uses a persistent event loop so the tastytrade SDK's httpx AsyncClient
+survives across multiple sync calls.
 """
 from __future__ import annotations
 
@@ -28,16 +31,33 @@ class AccountSnapshot:
     fetched_at: str            # ISO datetime
 
 
+def _get_loop() -> asyncio.AbstractEventLoop:
+    """Get or create a persistent event loop for tastytrade SDK calls."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
+
 class TastytradeClient:
     """Synchronous facade over the async tastytrade SDK."""
 
     def __init__(self) -> None:
         self._session = None
         self._account = None
+        self._loop = _get_loop()
+
+    def _run(self, coro):
+        """Run an async coroutine on the persistent event loop."""
+        return self._loop.run_until_complete(coro)
 
     def authenticate(self) -> None:
         """Authenticate via OAuth2. Try cached session first, fall back to fresh auth."""
-        asyncio.run(self._async_authenticate())
+        self._run(self._async_authenticate())
 
     async def _async_authenticate(self) -> None:
         from tastytrade import Session, Account
@@ -62,13 +82,13 @@ class TastytradeClient:
 
         # Fresh authentication if no cached session
         if self._session is None:
-            if not settings.tastytrade_client_secret or not settings.tastytrade_refresh_token:
+            if not settings.tt_secret or not settings.tt_refresh:
                 raise ValueError(
-                    "TASTYTRADE_CLIENT_SECRET and TASTYTRADE_REFRESH_TOKEN must be set in .env"
+                    "TT_SECRET and TT_REFRESH must be set in .env"
                 )
             self._session = Session(
-                provider_secret=settings.tastytrade_client_secret,
-                refresh_token=settings.tastytrade_refresh_token,
+                provider_secret=settings.tt_secret,
+                refresh_token=settings.tt_refresh,
             )
             logger.info("Authenticated with tastytrade via OAuth2")
 
@@ -100,10 +120,13 @@ class TastytradeClient:
 
     def get_account_snapshot(self) -> AccountSnapshot:
         """Fetch live account balances and positions."""
-        return asyncio.run(self._async_get_snapshot())
+        return self._run(self._async_get_snapshot())
 
     async def _async_get_snapshot(self) -> AccountSnapshot:
         from tastytrade import Account
+
+        # Refresh session token if needed
+        await self._session.refresh()
 
         # Brief pause between sequential API calls (~2 req/sec limit)
         balances = await self._account.get_balances(self._session)
@@ -132,6 +155,92 @@ class TastytradeClient:
             positions=pos_list,
             fetched_at=datetime.now().isoformat(),
         )
+
+    def get_quote(self, ticker: str) -> tuple[float, float, float]:
+        """Get live bid, ask, spread_pct via DXLinkStreamer.
+
+        Returns (bid, ask, spread_pct) tuple.
+        """
+        return self._run(self._async_get_quote(ticker))
+
+    async def _async_get_quote(self, ticker: str) -> tuple[float, float, float]:
+        from tastytrade import DXLinkStreamer
+        from tastytrade.dxfeed import Quote
+
+        async with DXLinkStreamer(self._session) as streamer:
+            await streamer.subscribe(Quote, [ticker])
+            async for quote in streamer.listen(Quote):
+                if quote.event_symbol == ticker:
+                    bid = float(quote.bid_price)
+                    ask = float(quote.ask_price)
+                    mid = (bid + ask) / 2
+                    spread_pct = (ask - bid) / mid if mid > 0 else float('inf')
+                    return bid, ask, spread_pct
+
+    def place_otoco_order(
+        self,
+        ticker: str,
+        shares: int,
+        limit_price: Decimal,
+        stop_price: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place OTOCO: limit buy (DAY) + GTC stop.
+
+        Returns order response dict.
+        """
+        return self._run(
+            self._async_place_otoco(ticker, shares, limit_price, stop_price, dry_run)
+        )
+
+    async def _async_place_otoco(
+        self,
+        ticker: str,
+        shares: int,
+        limit_price: Decimal,
+        stop_price: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Equity
+        from tastytrade.order import (
+            NewOrder,
+            NewComplexOrder,
+            OrderAction,
+            OrderType,
+            OrderTimeInForce,
+        )
+
+        symbol = await Equity.get(self._session, ticker)
+        opening = symbol.build_leg(Decimal(str(shares)), OrderAction.BUY_TO_OPEN)
+        closing = symbol.build_leg(Decimal(str(shares)), OrderAction.SELL_TO_CLOSE)
+
+        otoco = NewComplexOrder(
+            trigger_order=NewOrder(
+                time_in_force=OrderTimeInForce.DAY,
+                order_type=OrderType.LIMIT,
+                legs=[opening],
+                price=-limit_price,  # negative = debit (buy)
+            ),
+            orders=[
+                NewOrder(
+                    time_in_force=OrderTimeInForce.GTC,
+                    order_type=OrderType.STOP,
+                    legs=[closing],
+                    stop_trigger=stop_price,
+                ),
+            ],
+        )
+        response = await self._account.place_complex_order(
+            self._session, otoco, dry_run=dry_run
+        )
+        return {
+            "order_response": response,
+            "ticker": ticker,
+            "shares": shares,
+            "limit_price": float(limit_price),
+            "stop_price": float(stop_price),
+            "dry_run": dry_run,
+        }
 
     def sync_positions_to_db(self, snapshot: AccountSnapshot) -> int:
         """Write live positions to SQLite, replacing existing rows. Returns count synced."""
