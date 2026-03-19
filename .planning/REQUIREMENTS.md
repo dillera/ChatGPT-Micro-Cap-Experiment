@@ -9,9 +9,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Brokerage
 
-- [ ] **BROK-01**: System authenticates with tastytrade via OAuth2 and manages session tokens
-- [ ] **BROK-02**: System fetches live account balance and buying power at cycle start
-- [ ] **BROK-03**: System syncs live positions from tastytrade as source of truth
+- [x] **BROK-01**: System authenticates with tastytrade via OAuth2 and manages session tokens
+- [x] **BROK-02**: System fetches live account balance and buying power at cycle start
+- [x] **BROK-03**: System syncs live positions from tastytrade as source of truth
 - [ ] **BROK-04**: System places limit orders with dry_run validation before submission
 - [ ] **BROK-05**: System files companion GTC stop orders on every new buy for overnight protection
 
@@ -41,7 +41,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Infrastructure
 
 - [x] **INFR-01**: SQLite database replaces CSV files as primary state store
-- [ ] **INFR-02**: OTC/penny stock ticker validation before any order attempt
+- [x] **INFR-02**: OTC/penny stock ticker validation before any order attempt
 - [x] **INFR-03**: PDT day-trade counter prevents account lockout (max 3 day trades per 5 days)
 - [x] **INFR-04**: System supports --dry-run flag for full cycle without order submission
 
@@ -79,9 +79,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BROK-01 | Phase 1 | Pending |
-| BROK-02 | Phase 1 | Pending |
-| BROK-03 | Phase 1 | Pending |
+| BROK-01 | Phase 1 | Complete |
+| BROK-02 | Phase 1 | Complete |
+| BROK-03 | Phase 1 | Complete |
 | BROK-04 | Phase 2 | Pending |
 | BROK-05 | Phase 2 | Pending |
 | AIDC-01 | Phase 2 | Pending |
@@ -99,7 +99,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SIZE-04 | Phase 2 | Pending |
 | LOGS-01 | Phase 3 | Pending |
 | INFR-01 | Phase 1 | Complete |
-| INFR-02 | Phase 1 | Pending |
+| INFR-02 | Phase 1 | Complete |
 | INFR-03 | Phase 1 | Complete |
 | INFR-04 | Phase 1 | Complete |
 

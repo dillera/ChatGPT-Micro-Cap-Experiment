@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-03-19T13:46:32.283Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-03-19T13:51:48.354Z"
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -48,6 +48,7 @@ Plan: 3 of 3
 *Updated after each plan completion*
 | Phase 01 P01 | 2min | 2 tasks | 9 files |
 | Phase 01 P02 | 2min | 2 tasks | 4 files |
+| Phase 01 P03 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Used hatchling build backend with explicit packages=[src] for src-layout
 - [Phase 01]: Synchronous sqlite3 over aiosqlite -- state store not on async path
 - [Phase 01]: PDT safe limit 2 (not 3) -- 1-trade safety buffer per PITFALLS.md
+- [Phase 01]: SDK 12.2.0 Account.get() is async coroutine (not sync) -- asyncio.run() boundary pattern confirmed
+- [Phase 01]: Conservative OTC filter: unknown exchanges rejected by default, only VALID_EXCHANGES accepted
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T13:45:52Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-03-19T13:51:48.352Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
