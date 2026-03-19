@@ -23,8 +23,8 @@ See: .planning/PROJECT.md (updated 2026-03-19)
 
 ## Current Position
 
-Phase: 02 (execution-and-intelligence) — EXECUTING
-Plan: 2 of 3
+Phase: 02 (execution-and-intelligence) -- EXECUTING
+Plan: 2 of 3 (Plan 01 complete)
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Plan: 2 of 3
 | Phase 01 P01 | 2min | 2 tasks | 9 files |
 | Phase 01 P02 | 2min | 2 tasks | 4 files |
 | Phase 01 P03 | 2min | 2 tasks | 4 files |
+| Phase 02 P01 | 4min | 2 tasks | 8 files |
 | Phase 02 P02 | 2min | 1 tasks | 3 files |
 
 ## Accumulated Context
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 01]: PDT safe limit 2 (not 3) -- 1-trade safety buffer per PITFALLS.md
 - [Phase 01]: SDK 12.2.0 Account.get() is async coroutine (not sync) -- asyncio.run() boundary pattern confirmed
 - [Phase 01]: Conservative OTC filter: unknown exchanges rejected by default, only VALID_EXCHANGES accepted
+- [Phase 02]: GPT-5.4-mini=bull, Claude Sonnet 4.6=bear -- fixed role assignment amplifies natural model tendencies
+- [Phase 02]: Min confidence (not average) for threshold gating -- both models must be confident
+- [Phase 02]: Native Pydantic structured output via parse() on both SDKs -- no regex JSON parsing
 - [Phase 02]: Loguru logger.info for below-threshold sizing rejections (structured logging, not silent discard)
 - [Phase 02]: int() truncation for share rounding (floor division, never round up)
 
@@ -84,6 +88,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T14:40:42Z
-Stopped at: Completed 02-02-PLAN.md
-Resume file: .planning/phases/02-execution-and-intelligence/02-02-SUMMARY.md
+Last session: 2026-03-19T14:43:38Z
+Stopped at: Completed 02-01-PLAN.md (consensus engine)
+Resume file: .planning/phases/02-execution-and-intelligence/02-01-SUMMARY.md

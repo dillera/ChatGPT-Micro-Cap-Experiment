@@ -17,10 +17,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### AI Decision
 
-- [ ] **AIDC-01**: System queries both GPT-4 and Claude with adversarial prompts (bull/bear)
-- [ ] **AIDC-02**: Both models must agree on action for trade to execute (veto consensus)
-- [ ] **AIDC-03**: Both models must report confidence >= 0.6 for trade to proceed
-- [ ] **AIDC-04**: Disagreements default to HOLD with full logging of each model's reasoning
+- [x] **AIDC-01**: System queries both GPT-4 and Claude with adversarial prompts (bull/bear)
+- [x] **AIDC-02**: Both models must agree on action for trade to execute (veto consensus)
+- [x] **AIDC-03**: Both models must report confidence >= 0.6 for trade to proceed
+- [x] **AIDC-04**: Disagreements default to HOLD with full logging of each model's reasoning
 
 ### Operations
 
@@ -84,10 +84,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BROK-03 | Phase 1 | Complete |
 | BROK-04 | Phase 2 | Pending |
 | BROK-05 | Phase 2 | Pending |
-| AIDC-01 | Phase 2 | Pending |
-| AIDC-02 | Phase 2 | Pending |
-| AIDC-03 | Phase 2 | Pending |
-| AIDC-04 | Phase 2 | Pending |
+| AIDC-01 | Phase 2 | Complete |
+| AIDC-02 | Phase 2 | Complete |
+| AIDC-03 | Phase 2 | Complete |
+| AIDC-04 | Phase 2 | Complete |
 | OPER-01 | Phase 3 | Pending |
 | OPER-02 | Phase 3 | Pending |
 | OPER-03 | Phase 3 | Pending |
