@@ -51,9 +51,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Multi-LLM consensus engine (Pydantic schemas, bull/bear prompts, OpenAI + Anthropic structured output, veto consensus logic, SQLite audit logging)
-- [ ] 02-02-PLAN.md — Position sizing module (confidence-tiered formula, $50 minimum guard, whole-share rounding, buying power integration)
-- [ ] 02-03-PLAN.md — Order execution layer (spread check gate, OTC filter, PDT guard, OTOCO limit+stop orders, dry_run validation, trade recording)
+- [x] 02-01-PLAN.md — Multi-LLM consensus engine (Pydantic schemas, bull/bear prompts, OpenAI + Anthropic structured output, veto consensus logic, SQLite audit logging)
+- [x] 02-02-PLAN.md — Position sizing module (confidence-tiered formula, $50 minimum guard, whole-share rounding, buying power integration)
+- [x] 02-03-PLAN.md — Order execution layer (spread check gate, OTC filter, PDT guard, OTOCO limit+stop orders, dry_run validation, trade recording)
 
 ### Phase 3: Autonomous Operations
 **Goal**: A single cron trigger fires the complete trading cycle each market day — circuit breakers halt trading when risk limits are breached, stop-losses enforce against live positions, and every cycle produces a structured log
@@ -65,12 +65,12 @@ Plans:
   3. If daily loss exceeds 10% of opening balance, the circuit breaker trips and no further orders are placed that day
   4. If drawdown exceeds 30% from all-time high, the circuit breaker trips and remains tripped until manually overridden
   5. A structured JSON run log is written after every cycle containing the full state snapshot (positions, decisions, orders, circuit breaker status)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: Implement trading cycle orchestrator (stage sequencing, lockfile for cron overlap prevention, market status check, top-level exception handling)
-- [ ] 03-02: Implement risk management module (circuit breaker state machine, daily loss limit, max drawdown halt, manual reset requirement, SQLite persistence)
-- [ ] 03-03: Implement structured JSON run logging and wire APScheduler for daily autonomous scheduling
+- [ ] 03-01-PLAN.md — Trading cycle orchestrator with stop-loss enforcement (stage sequencing, lockfile, market check, stop-loss before LLM calls)
+- [ ] 03-02-PLAN.md — Circuit breaker state machine (10% daily loss limit, 30% max drawdown halt, manual reset, SQLite persistence)
+- [ ] 03-03-PLAN.md — Structured JSON run logging, circuit breaker wiring, and CLI update for autonomous execution
 
 ### Phase 4: Hardening
 **Goal**: The system can be fully exercised in dry-run mode without placing real orders — every code path is tested and the operator has confidence in the system before leaving it unattended
