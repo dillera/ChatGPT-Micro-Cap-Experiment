@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-02-PLAN.md (circuit breaker state machine)
-last_updated: "2026-03-19T15:18:33.618Z"
+stopped_at: Completed 03-03-PLAN.md (run logging + CLI wiring)
+last_updated: "2026-03-19T15:23:06.478Z"
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 9
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Project State
@@ -23,8 +23,8 @@ See: .planning/PROJECT.md (updated 2026-03-19)
 
 ## Current Position
 
-Phase: 03 (autonomous-operations) — EXECUTING
-Plan: 2 of 3
+Phase: 03 (autonomous-operations) — COMPLETE
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Plan: 2 of 3
 | Phase 02 P03 | 7min | 2 tasks | 4 files |
 | Phase 03 P01 | 2min | 2 tasks | 2 files |
 | Phase 03 P02 | 2min | 2 tasks | 2 files |
+| Phase 03 P03 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,9 @@ Recent decisions affecting current work:
 - [Phase 03]: Weekend-only market check for v1 (proper calendar deferred to Phase 5)
 - [Phase 03]: Peak equity tracked via MAX(peak_equity) from daily_snapshots, not a separate counter
 - [Phase 03]: HALTED_DAILY auto-reset uses string date comparison on read -- no cron job needed
+- [Phase 03]: run_logs/ auto-created and gitignored (runtime output)
+- [Phase 03]: CB evaluation after order execution (Stage 9), daily snapshot uses pre-trade NLV
+- [Phase 03]: CLI exit 0 for complete/skipped/halted; exit 1 only for errors
 
 ### Pending Todos
 
@@ -100,6 +104,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T15:18:33.616Z
-Stopped at: Completed 03-02-PLAN.md (circuit breaker state machine)
+Last session: 2026-03-19T15:23:06.476Z
+Stopped at: Completed 03-03-PLAN.md (run logging + CLI wiring)
 Resume file: None

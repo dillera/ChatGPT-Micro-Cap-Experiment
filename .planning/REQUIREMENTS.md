@@ -36,7 +36,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **SIZE-02**: High conviction (>= 0.75) allows up to 40% of buying power per trade
 - [x] **SIZE-03**: Normal conviction (>= 0.6) allows up to 20% of buying power per trade
 - [x] **SIZE-04**: No trade smaller than $50 (commission protection)
-- [ ] **LOGS-01**: Structured JSON run log written after every cycle with full state snapshot
+- [x] **LOGS-01**: Structured JSON run log written after every cycle with full state snapshot
 
 ### Infrastructure
 
@@ -97,7 +97,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SIZE-02 | Phase 2 | Complete |
 | SIZE-03 | Phase 2 | Complete |
 | SIZE-04 | Phase 2 | Complete |
-| LOGS-01 | Phase 3 | Pending |
+| LOGS-01 | Phase 3 | Complete |
 | INFR-01 | Phase 1 | Complete |
 | INFR-02 | Phase 1 | Complete |
 | INFR-03 | Phase 1 | Complete |
