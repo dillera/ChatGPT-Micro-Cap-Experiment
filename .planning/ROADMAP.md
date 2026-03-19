@@ -124,10 +124,11 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
   3. LLMs propose new ticker candidates based on portfolio state and market conditions
   4. All candidates pass OTC filter and exchange validation before consensus
   5. Daily cycle pulls candidates from all three sources and runs consensus on each
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 6 to break down)
+- [ ] 06-01-PLAN.md — Watchlist CRUD (SQLite table, add/remove/list functions, CLI subcommands) and sector-based micro-cap screener (yfinance, OTC filter, cache)
+- [ ] 06-02-PLAN.md — LLM discovery prompt for ticker proposals and cycle integration wiring all three candidate sources into daily trading cycle
 
 ### Phase 7: Streamlit Dashboard
 **Goal**: A local Streamlit web app for managing the watchlist, viewing positions/P&L, reviewing run logs, and monitoring circuit breaker status — the operator's window into the autonomous system
