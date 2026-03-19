@@ -19,16 +19,15 @@ class Settings(BaseSettings):
     tt_secret: str = ""
     tt_refresh: str = ""
 
-    # LLM API keys (Phase 2 will use these)
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
+    # LLM API keys — both models routed through OpenRouter
+    openrouter_api_key: str = ""
 
     # Database
     db_path: str = str(DATA_DIR / "trading_bot.db")
 
-    # Consensus engine
-    openai_model: str = "gpt-5.4-mini"
-    anthropic_model: str = "claude-sonnet-4-6"
+    # Consensus engine (overridable via OPENAI_MODEL / ANTHROPIC_MODEL env vars)
+    openai_model: str = "openai/gpt-4o-mini"
+    anthropic_model: str = "anthropic/claude-sonnet-4-6"
     consensus_temperature: float = 0.3
     consensus_max_tokens: int = 2000
     min_confidence: float = 0.6
@@ -60,3 +59,9 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def reset_settings() -> None:
+    """Force settings to reload from .env on next get_settings() call."""
+    global _settings
+    _settings = None

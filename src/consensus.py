@@ -12,23 +12,28 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
-import anthropic
 from loguru import logger
 from openai import OpenAI
+
+import yfinance as yf
 
 from src.config import get_settings
 from src.db import get_db
 from src.models import ConsensusResult, TradingAnalysis, TradeRecommendation
-from src.prompts import BEAR_SYSTEM, BULL_SYSTEM, build_user_prompt
+from src.otc_filter import validate_symbols
+from src.prompts import BEAR_SYSTEM, BULL_SYSTEM, DISCOVERY_SYSTEM, build_discovery_prompt, build_user_prompt
 
 
 def query_bull(prompt: str) -> TradingAnalysis:
-    """Query GPT-5.4-mini with bull (aggressive) role.
+    """Query GPT (via OpenRouter) with bull (aggressive) role.
 
     Uses OpenAI native structured output via parse().
     """
     settings = get_settings()
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = OpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )
     completion = client.chat.completions.parse(
         model=settings.openai_model,
         messages=[
@@ -37,26 +42,32 @@ def query_bull(prompt: str) -> TradingAnalysis:
         ],
         response_format=TradingAnalysis,
         temperature=settings.consensus_temperature,
-        max_tokens=settings.consensus_max_tokens,
+        max_completion_tokens=settings.consensus_max_tokens,
     )
     return completion.choices[0].message.parsed
 
 
 def query_bear(prompt: str) -> TradingAnalysis:
-    """Query Claude Sonnet 4.6 with bear (skeptical) role.
+    """Query Claude (via OpenRouter) with bear (skeptical) role.
 
-    Uses Anthropic native structured output via parse().
+    Uses OpenAI-compatible structured output via parse().
     """
     settings = get_settings()
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    response = client.messages.parse(
-        model=settings.anthropic_model,
-        max_tokens=settings.consensus_max_tokens,
-        system=BEAR_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
-        output_format=TradingAnalysis,
+    client = OpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
     )
-    return response.parsed_output
+    completion = client.chat.completions.parse(
+        model=settings.anthropic_model,
+        messages=[
+            {"role": "system", "content": BEAR_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        response_format=TradingAnalysis,
+        temperature=settings.consensus_temperature,
+        max_completion_tokens=settings.consensus_max_tokens,
+    )
+    return completion.choices[0].message.parsed
 
 
 def evaluate_consensus(
@@ -269,3 +280,110 @@ def run_consensus_cycle(
         all_symbols_seen=all_symbols,
         disagreed_symbols=disagreed,
     )
+
+
+def _query_bull_discovery(prompt: str) -> TradingAnalysis:
+    """Query GPT (via OpenRouter) with DISCOVERY_SYSTEM prompt for ticker proposals."""
+    settings = get_settings()
+    client = OpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )
+    completion = client.chat.completions.parse(
+        model=settings.openai_model,
+        messages=[
+            {"role": "system", "content": DISCOVERY_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        response_format=TradingAnalysis,
+        temperature=settings.consensus_temperature,
+        max_completion_tokens=settings.consensus_max_tokens,
+    )
+    return completion.choices[0].message.parsed
+
+
+def _query_bear_discovery(prompt: str) -> TradingAnalysis:
+    """Query Claude (via OpenRouter) with DISCOVERY_SYSTEM prompt for ticker proposals."""
+    settings = get_settings()
+    client = OpenAI(
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )
+    completion = client.chat.completions.parse(
+        model=settings.anthropic_model,
+        messages=[
+            {"role": "system", "content": DISCOVERY_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        response_format=TradingAnalysis,
+        temperature=settings.consensus_temperature,
+        max_completion_tokens=settings.consensus_max_tokens,
+    )
+    return completion.choices[0].message.parsed
+
+
+def run_discovery_cycle(
+    positions: list[dict],
+    watchlist: list[str],
+    buying_power: float,
+) -> list[str]:
+    """Ask both LLMs to propose new micro-cap ticker candidates.
+
+    Queries both models with DISCOVERY_SYSTEM, extracts proposed symbols,
+    validates each via yfinance exchange lookup + OTC filter, and returns
+    accepted ticker strings. Non-fatal: any failure returns empty list.
+
+    Args:
+        positions: Current portfolio positions (to avoid duplicates).
+        watchlist: Active watchlist symbols (to avoid duplicates).
+        buying_power: Available buying power (context for LLMs).
+
+    Returns:
+        List of validated ticker strings proposed by either LLM.
+    """
+    try:
+        settings = get_settings()
+        prompt = build_discovery_prompt(positions, watchlist, buying_power)
+
+        # Query both models; collect all proposed symbols
+        proposed: set[str] = set()
+        try:
+            bull_result = _query_bull_discovery(prompt)
+            for rec in bull_result.recommendations:
+                proposed.add(rec.symbol.upper().strip())
+        except Exception as e:
+            logger.warning("Discovery: bull model failed: {}", e)
+
+        try:
+            bear_result = _query_bear_discovery(prompt)
+            for rec in bear_result.recommendations:
+                proposed.add(rec.symbol.upper().strip())
+        except Exception as e:
+            logger.warning("Discovery: bear model failed: {}", e)
+
+        if not proposed:
+            logger.info("Discovery: no symbols proposed by either model")
+            return []
+
+        logger.info("Discovery: {} symbols proposed: {}", len(proposed), sorted(proposed))
+
+        # Validate each symbol via yfinance exchange lookup
+        symbols_with_exchanges: list[tuple[str, str | None]] = []
+        for sym in proposed:
+            try:
+                info = yf.Ticker(sym).info
+                exchange = info.get("exchange")
+            except Exception:
+                exchange = None
+            symbols_with_exchanges.append((sym, exchange))
+
+        accepted, rejected = validate_symbols(symbols_with_exchanges)
+        if rejected:
+            logger.info("Discovery: {} tickers rejected by OTC filter: {}", len(rejected), rejected)
+        logger.info("Discovery: {} validated tickers accepted: {}", len(accepted), accepted)
+
+        return accepted
+
+    except Exception as e:
+        logger.warning("Discovery cycle failed (non-fatal): {}", e)
+        return []

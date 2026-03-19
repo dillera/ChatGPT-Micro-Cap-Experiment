@@ -73,17 +73,17 @@ class TradeRecommendation(BaseModel):
 
     action: Literal["BUY", "SELL", "HOLD"]
     symbol: str = Field(description="Ticker symbol, e.g. RXRX")
-    confidence: float = Field(ge=0.0, le=1.0, description="0.0-1.0 conviction level")
+    confidence: float = Field(description="Conviction level between 0.0 and 1.0")
     stop_loss_pct: float = Field(
-        ge=0.01, le=0.50, description="Stop loss as % below entry"
+        description="Stop loss as decimal fraction below entry, e.g. 0.08 for 8%. Between 0.01 and 0.50."
     )
-    reasoning: str = Field(max_length=500, description="2-3 sentence rationale")
+    reasoning: str = Field(description="2-3 sentence rationale")
 
 
 class TradingAnalysis(BaseModel):
     """Top-level response schema for each LLM."""
 
-    market_assessment: str = Field(max_length=300)
+    market_assessment: str = Field(description="Brief overall market assessment")
     recommendations: list[TradeRecommendation]
 
 
