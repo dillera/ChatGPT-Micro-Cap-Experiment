@@ -21,11 +21,13 @@ from pathlib import Path
 from loguru import logger
 
 from src.broker import TastytradeClient
+from src.circuit_breaker import evaluate_circuit_breaker, get_cb_status, record_daily_snapshot
 from src.config import get_settings
 from src.consensus import run_consensus_cycle
 from src.db import get_db, init_db
 from src.orders import execute_trade
 from src.pdt import check_pdt_limit, get_day_trade_count
+from src.run_logger import write_run_log
 from src.stoploss import check_and_enforce_stops
 
 
@@ -67,6 +69,9 @@ def run_cycle(dry_run: bool = True) -> dict:
         6. Consensus (query bull/bear LLMs)
         7. Order execution (for approved trades)
         8. Post-trade snapshot
+        9. Circuit breaker evaluation (post-trade loss check)
+        10. Daily snapshot recording (equity/drawdown tracking)
+        11. Write structured JSON run log
 
     Args:
         dry_run: If True, no real orders are submitted.
@@ -111,17 +116,8 @@ def run_cycle(dry_run: bool = True) -> dict:
         )
 
         # --- Stage 4: Circuit breaker check ---
-        conn = get_db()
-        try:
-            row = conn.execute(
-                "SELECT status, reason FROM circuit_breaker WHERE id=1"
-            ).fetchone()
-            cb_status = row["status"] if row else "ACTIVE"
-            cb_reason = row["reason"] if row else None
-        finally:
-            conn.close()
-
-        if cb_status != "ACTIVE":
+        cb = get_cb_status()  # Handles HALTED_DAILY auto-reset on new calendar day
+        if cb.status != "ACTIVE":
             override = os.environ.get("OVERRIDE_CIRCUIT_BREAKER") == "1"
             if override:
                 conn = get_db()
@@ -133,12 +129,12 @@ def run_cycle(dry_run: bool = True) -> dict:
                     conn.commit()
                 finally:
                     conn.close()
-                logger.warning("Circuit breaker manually overridden from {}", cb_status)
+                logger.warning("Circuit breaker manually overridden from {}", cb.status)
             else:
-                logger.warning("Circuit breaker is {}: {}", cb_status, cb_reason)
+                logger.warning("Circuit breaker is {}: {}", cb.status, cb.reason)
                 return {
                     "status": "halted",
-                    "reason": f"circuit_breaker: {cb_status}",
+                    "reason": f"circuit_breaker: {cb.status}",
                     "timestamp": now.isoformat(),
                 }
         logger.info("Stage 4 complete: circuit breaker = ACTIVE")
@@ -215,8 +211,8 @@ def run_cycle(dry_run: bool = True) -> dict:
         except Exception as e:
             logger.error("Post-trade snapshot failed: {}", e)
 
-        # --- Build result ---
-        result = {
+        # --- Build result (stages 9-11 will enrich this) ---
+        cycle_result = {
             "status": "complete",
             "timestamp": datetime.now().isoformat(),
             "dry_run": dry_run,
@@ -235,8 +231,56 @@ def run_cycle(dry_run: bool = True) -> dict:
             "post_trade_nlv": post_snapshot.net_liquidating_value if post_snapshot else None,
         }
 
+        # --- Stage 9: Circuit breaker evaluation (post-trade) ---
+        if post_snapshot:
+            try:
+                cb_eval = evaluate_circuit_breaker(
+                    snapshot.net_liquidating_value,
+                    post_snapshot.net_liquidating_value,
+                )
+                cycle_result["circuit_breaker"] = {
+                    "status": cb_eval.status,
+                    "tripped_at": cb_eval.tripped_at,
+                    "reason": cb_eval.reason,
+                }
+                logger.info("Stage 9 complete: circuit breaker eval = {}", cb_eval.status)
+            except Exception as e:
+                logger.error("Circuit breaker evaluation failed: {}", e)
+                cycle_result["circuit_breaker"] = {"status": "error", "reason": str(e)}
+        else:
+            cycle_result["circuit_breaker"] = None
+
+        # --- Stage 10: Daily snapshot recording ---
+        if post_snapshot:
+            try:
+                ds = record_daily_snapshot(
+                    post_snapshot,
+                    previous_nlv=snapshot.net_liquidating_value,
+                )
+                cycle_result["daily_snapshot"] = {
+                    "date": ds.snapshot_date,
+                    "equity": ds.total_equity,
+                    "pnl": ds.daily_pnl,
+                    "pnl_pct": ds.daily_pnl_pct,
+                    "peak": ds.peak_equity,
+                    "drawdown_pct": ds.drawdown_pct,
+                }
+                logger.info("Stage 10 complete: daily snapshot recorded")
+            except Exception as e:
+                logger.error("Daily snapshot recording failed: {}", e)
+                cycle_result["daily_snapshot"] = None
+        else:
+            cycle_result["daily_snapshot"] = None
+
+        # --- Stage 11: Write run log ---
+        try:
+            write_run_log(cycle_result)
+            logger.info("Stage 11 complete: run log written")
+        except Exception as e:
+            logger.error("Run log write failed: {}", e)
+
         logger.info("=== Trading cycle complete ===")
-        return result
+        return cycle_result
 
     except Exception as e:
         logger.exception("Cycle failed: {}", e)
