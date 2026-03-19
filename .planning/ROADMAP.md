@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation** - SQLite state store, proven OAuth2 auth, read-only brokerage sync, and dev environment (completed 2026-03-19)
 - [x] **Phase 2: Execution and Intelligence** - Live order execution, multi-LLM consensus engine, and position sizing (completed 2026-03-19)
 - [x] **Phase 3: Autonomous Operations** - Daily trading cycle, circuit breakers, stop-loss enforcement, and structured logging (completed 2026-03-19)
-- [ ] **Phase 4: Hardening** - End-to-end dry-run test suite, operational validation, and system confidence
+- [x] **Phase 4: Hardening** - End-to-end dry-run test suite, operational validation, and system confidence (completed 2026-03-19)
 - [ ] **Phase 5: Tuning** - Evidence-based threshold and prompt refinement from live run data
 
 ## Phase Details
@@ -84,8 +84,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — End-to-end dry-run test harness (12 tests covering all 11 pipeline stages with failure injection: happy path, LLM failure, CB halt, weekend skip, lockfile, run log verification, stop-loss, post-trade CB trip)
-- [ ] 04-02-PLAN.md — Pitfall mitigation validation (25+ tests proving OTC filter, OAuth2 path, PDT counter, spread check, consensus veto, parse failure abort, circuit breaker states, position sizing guards)
+- [x] 04-01-PLAN.md — End-to-end dry-run test harness (12 tests covering all 11 pipeline stages with failure injection: happy path, LLM failure, CB halt, weekend skip, lockfile, run log verification, stop-loss, post-trade CB trip)
+- [x] 04-02-PLAN.md — Pitfall mitigation validation (50 tests proving OTC filter, OAuth2 path, PDT counter, spread check, consensus veto, parse failure abort, circuit breaker states, position sizing guards)
 
 ### Phase 5: Tuning
 **Goal**: After real trading runs accumulate data, the system's consensus thresholds, position sizing tiers, and prompt quality are refined based on observed behavior — not speculation
@@ -111,5 +111,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 1. Foundation | 3/3 | Complete   | 2026-03-19 |
 | 2. Execution and Intelligence | 3/3 | Complete   | 2026-03-19 |
 | 3. Autonomous Operations | 3/3 | Complete   | 2026-03-19 |
-| 4. Hardening | 0/2 | Not started | - |
+| 4. Hardening | 2/2 | Complete   | 2026-03-19 |
 | 5. Tuning | 0/2 | Not started | - |

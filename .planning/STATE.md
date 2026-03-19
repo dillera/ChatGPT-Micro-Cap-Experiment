@@ -55,6 +55,7 @@ Plan: 2 of 2 (all plans complete)
 | Phase 03 P01 | 2min | 2 tasks | 2 files |
 | Phase 03 P02 | 2min | 2 tasks | 2 files |
 | Phase 03 P03 | 2min | 2 tasks | 4 files |
+| Phase 04 P02 | 3min | 2 tasks | 2 files |
 | Phase 04 P01 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
@@ -91,6 +92,8 @@ Recent decisions affecting current work:
 - [Phase 03]: run_logs/ auto-created and gitignored (runtime output)
 - [Phase 03]: CB evaluation after order execution (Stage 9), daily snapshot uses pre-trade NLV
 - [Phase 03]: CLI exit 0 for complete/skipped/halted; exit 1 only for errors
+- [Phase 04]: Parametrized OTC exchange tests cover all 13 valid + 7 OTC entries exhaustively
+- [Phase 04]: Fixed case-insensitive exchange comparison bug (frozenset entries normalized to uppercase)
 - [Phase 04]: All module get_db references patched via monkeypatch for true in-memory DB sharing in E2E tests
 - [Phase 04]: E2E tests exercise real production code paths with mocked externals for maximum confidence
 
@@ -107,6 +110,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T15:45:55.956Z
-Stopped at: Completed 04-01-PLAN.md (E2E dry-run cycle tests)
+Last session: 2026-03-19T15:45:07Z
+Stopped at: Completed 04-02-PLAN.md (pitfall mitigation validation)
 Resume file: None
