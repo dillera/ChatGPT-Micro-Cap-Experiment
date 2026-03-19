@@ -113,6 +113,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Autonomous Operations | 3/3 | Complete   | 2026-03-19 |
 | 4. Hardening | 2/2 | Complete   | 2026-03-19 |
 | 5. Tuning | 0/2 | Not started | - |
+| 6. Watchlist and Screening | 2/2 | Complete | 2026-03-19 |
+| 7. Streamlit Dashboard | 0/2 | Not started | - |
 
 ### Phase 6: Watchlist and Screening
 **Goal**: Manual watchlist management, sector-based micro-cap screening, and LLM-proposed ticker discovery — feeding candidate tickers into the consensus engine
@@ -127,8 +129,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 **Plans**: 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Watchlist CRUD (SQLite table, add/remove/list functions, CLI subcommands) and sector-based micro-cap screener (yfinance, OTC filter, cache)
-- [ ] 06-02-PLAN.md — LLM discovery prompt for ticker proposals and cycle integration wiring all three candidate sources into daily trading cycle
+- [x] 06-01-PLAN.md — Watchlist CRUD (SQLite table, add/remove/list functions, CLI subcommands) and sector-based micro-cap screener (yfinance, OTC filter, cache)
+- [x] 06-02-PLAN.md — LLM discovery prompt for ticker proposals and cycle integration wiring all three candidate sources into daily trading cycle
 
 ### Phase 7: Streamlit Dashboard
 **Goal**: A local Streamlit web app for managing the watchlist, viewing positions/P&L, reviewing run logs, and monitoring circuit breaker status — the operator's window into the autonomous system
@@ -140,6 +142,8 @@ Plans:
   3. Run log history is browsable with expandable detail per cycle
   4. Circuit breaker status is visible with manual reset button
   5. Sector screener results are displayed and can be added to watchlist with one click
+**Plans**: 2 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 7 to break down)
+- [ ] 07-01-PLAN.md — Core dashboard: portfolio positions/P&L display, watchlist management UI, circuit breaker status with manual reset
+- [ ] 07-02-PLAN.md — Run log browser with expandable JSON detail, sector screener results with one-click add-to-watchlist
