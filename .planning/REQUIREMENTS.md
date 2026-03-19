@@ -45,6 +45,22 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **INFR-03**: PDT day-trade counter prevents account lockout (max 3 day trades per 5 days)
 - [x] **INFR-04**: System supports --dry-run flag for full cycle without order submission
 
+### Watchlist & Screening
+
+- [ ] **WATCH-01**: User can add/remove tickers to a persistent watchlist via CLI or API
+- [ ] **WATCH-02**: System screens for micro-cap stocks matching sector criteria (biotech, tech) with market cap and volume filters
+- [ ] **WATCH-03**: LLMs propose new ticker candidates based on market conditions and portfolio gaps
+- [ ] **WATCH-04**: Candidate tickers are validated (OTC filter, exchange check) before entering the consensus pipeline
+- [ ] **WATCH-05**: Daily cycle pulls candidates from watchlist + screener + LLM proposals and runs consensus on each
+
+### Dashboard
+
+- [ ] **DASH-01**: Streamlit app displays current portfolio positions with P&L at localhost:8501
+- [ ] **DASH-02**: User can add/remove watchlist tickers via the UI with immediate SQLite persistence
+- [ ] **DASH-03**: Run log history is browsable with expandable detail per cycle
+- [ ] **DASH-04**: Circuit breaker status visible with manual reset button
+- [ ] **DASH-05**: Sector screener results displayed and addable to watchlist with one click
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -65,7 +81,7 @@ Deferred to future release. Tracked but not in current roadmap.
 | Feature | Reason |
 |---------|--------|
 | Options trading | Complexity too high for v1; risk can exceed account value |
-| Web UI / dashboard | Zero trading value; Telegram/CLI sufficient for single operator |
+| ~~Web UI / dashboard~~ | Moved to v1 scope — Streamlit dashboard (Phase 7) |
 | Intraday monitoring | Micro-cap catalysts play out over days, not minutes; native stops cover gaps |
 | Backtesting framework | 11-week live experiment IS the backtest; forward-test with real money |
 | Multi-account support | Single tastytrade account constraint |

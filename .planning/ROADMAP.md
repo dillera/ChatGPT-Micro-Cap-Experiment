@@ -113,3 +113,32 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Autonomous Operations | 3/3 | Complete   | 2026-03-19 |
 | 4. Hardening | 2/2 | Complete   | 2026-03-19 |
 | 5. Tuning | 0/2 | Not started | - |
+
+### Phase 6: Watchlist and Screening
+**Goal**: Manual watchlist management, sector-based micro-cap screening, and LLM-proposed ticker discovery — feeding candidate tickers into the consensus engine
+**Depends on**: Phase 4 (can run before Phase 5 since it doesn't need live data)
+**Requirements**: WATCH-01, WATCH-02, WATCH-03, WATCH-04, WATCH-05
+**Success Criteria** (what must be TRUE):
+  1. User can add/remove tickers to a persistent watchlist stored in SQLite
+  2. Sector screener returns micro-cap stocks matching criteria (market cap, volume, exchange)
+  3. LLMs propose new ticker candidates based on portfolio state and market conditions
+  4. All candidates pass OTC filter and exchange validation before consensus
+  5. Daily cycle pulls candidates from all three sources and runs consensus on each
+**Plans**: TBD
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 6 to break down)
+
+### Phase 7: Streamlit Dashboard
+**Goal**: A local Streamlit web app for managing the watchlist, viewing positions/P&L, reviewing run logs, and monitoring circuit breaker status — the operator's window into the autonomous system
+**Depends on**: Phase 6
+**Requirements**: DASH-01, DASH-02, DASH-03, DASH-04, DASH-05
+**Success Criteria** (what must be TRUE):
+  1. Streamlit app runs at localhost:8501 and displays current portfolio positions with P&L
+  2. User can add/remove watchlist tickers via the UI with immediate SQLite persistence
+  3. Run log history is browsable with expandable detail per cycle
+  4. Circuit breaker status is visible with manual reset button
+  5. Sector screener results are displayed and can be added to watchlist with one click
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 7 to break down)
