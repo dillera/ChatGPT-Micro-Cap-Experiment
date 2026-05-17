@@ -29,8 +29,10 @@ class Settings(BaseSettings):
     openai_model: str = "openai/gpt-4o-mini"
     anthropic_model: str = "anthropic/claude-sonnet-4-6"
     consensus_temperature: float = 0.3
-    consensus_max_tokens: int = 2000
-    min_confidence: float = 0.6
+    consensus_max_tokens: int = 8000
+    min_confidence: float = 0.5
+    soft_consensus_penalty: float = 0.80   # Multiply bull confidence when bear says HOLD (not SELL)
+    max_candidates_per_cycle: int = 10     # Cap candidates sent to LLMs — focus beats breadth
 
     # Circuit breaker thresholds (Phase 3)
     max_daily_loss_pct: float = 0.10    # OPER-03: halt if daily loss > 10%
@@ -42,6 +44,47 @@ class Settings(BaseSettings):
     screener_min_volume: int = 10_000             # 10K avg daily volume
     screener_cache_hours: int = 24                # Cache TTL
     screener_max_results_per_sector: int = 20     # Cap results
+
+    # Research pipeline (broad multi-strategy screener)
+    research_max_market_cap: float = 2_000_000_000  # $2B (small/mid cap)
+    research_min_market_cap: float = 10_000_000     # $10M floor
+    research_min_price: float = 2.0                 # Minimum stock price
+    research_min_volume: int = 50_000               # Minimum avg daily volume
+    research_max_per_run: int = 30                  # Max new symbols to add per run
+
+    # Evaluation cooldown
+    eval_cooldown_hours: int = 24  # Skip re-evaluating a symbol for this many hours
+
+    # Position sizing
+    min_trade_value: float = 10.0   # Minimum notional per trade (SIZE-04); lower if buying power is small
+
+    # Options (put buying for bearish candidates) — legacy, kept for backward compat
+    options_put_dte: int = 30
+    options_max_contracts: int = 5
+    options_buying_power_pct: float = 0.02
+    options_min_underlying_price: float = 5.0
+
+    # 0DTE vertical spread strategy — $100/day target
+    options_daily_profit_target: float = 100.0
+    options_daily_stop_loss: float = 150.0       # halt new trades if daily loss >= this
+    options_max_trades_per_day: int = 3
+    options_spread_width: float = 5.0            # $5-wide spreads for SPY/QQQ
+    options_max_debit_pct: float = 0.50          # debit <= 50% of width (risk/reward gate)
+    options_profit_close_pct: float = 0.50       # close at 50% of max profit
+    options_universe: list[str] = ["SPY", "QQQ", "IWM"]
+
+    # Trading windows (Eastern time as HH:MM strings)
+    orb_entry_start: str = "09:45"
+    orb_entry_end: str = "10:15"
+    midday_start: str = "11:00"
+    midday_end: str = "14:00"
+    preclose_start: str = "15:00"
+    preclose_end: str = "15:45"
+    eod_close_time: str = "15:45"               # force-close all 0DTE by this time
+
+    # VIX thresholds
+    vix_high_threshold: float = 25.0
+    vix_extreme_threshold: float = 35.0
 
     # Runtime flags
     dry_run: bool = False
