@@ -20,15 +20,22 @@ from pathlib import Path
 
 from loguru import logger
 
+import yfinance as yf
+
 from src.broker import TastytradeClient
 from src.circuit_breaker import evaluate_circuit_breaker, get_cb_status, record_daily_snapshot
 from src.config import get_settings
-from src.consensus import run_consensus_cycle
+from src.consensus import run_consensus_cycle, run_discovery_cycle
+from src.cooldown import filter_cooled_down, mark_evaluated
 from src.db import get_db, init_db
-from src.orders import execute_trade
+from src.orders import execute_put_trade, execute_trade
+from src.otc_filter import validate_symbols
 from src.pdt import check_pdt_limit, get_day_trade_count
+from src.research import run_research
 from src.run_logger import write_run_log
+from src.screener import get_screener_candidates
 from src.stoploss import check_and_enforce_stops
+from src.watchlist import get_active_symbols, remove_ticker
 
 
 LOCK_PATH = Path(get_settings().db_path).parent / "cycle.lock"
@@ -54,6 +61,84 @@ def _release_lock(fh) -> None:
             fh.close()
         except Exception:
             pass
+
+
+def gather_candidates(snapshot, dry_run: bool) -> tuple[list[str], dict]:
+    """Gather buy candidates from all three sources, deduplicate against positions.
+
+    Sources:
+      1. Manual watchlist (src/watchlist.py)
+      2. Sector screener (src/screener.py)
+      3. LLM discovery proposals (src/consensus.py)
+
+    Args:
+        snapshot: AccountSnapshot with current positions and buying_power.
+        dry_run: Passed to screener/discovery for context (informational only).
+
+    Returns:
+        Tuple of (new_candidate_symbols, counts_dict).
+        new_candidate_symbols excludes tickers already held.
+    """
+    # Source 0: research pipeline — find new small/mid-cap candidates and add to watchlist
+    held_symbols = [p["symbol"] for p in snapshot.positions]
+    try:
+        research_added = run_research(held_symbols=held_symbols)
+        if research_added:
+            logger.info("Research added {} new symbols to watchlist", research_added)
+    except Exception as e:
+        logger.warning("Research pipeline failed (non-fatal): {}", e)
+
+    # Source 1: manual watchlist — validate against OTC filter and purge rejects
+    try:
+        raw_watchlist = get_active_symbols()
+        symbols_with_exchanges: list[tuple[str, str | None]] = []
+        for sym in raw_watchlist:
+            try:
+                exchange = yf.Ticker(sym).fast_info.exchange
+            except Exception:
+                exchange = None
+            symbols_with_exchanges.append((sym, exchange))
+        watchlist, rejected = validate_symbols(symbols_with_exchanges)
+        for sym in rejected:
+            remove_ticker(sym)
+            logger.warning("Watchlist: removed {} — failed OTC/exchange validation", sym)
+    except Exception as e:
+        logger.warning("Watchlist fetch failed (non-fatal): {}", e)
+        watchlist = []
+
+    # Source 2: sector screener
+    try:
+        screened = get_screener_candidates()
+    except Exception as e:
+        logger.warning("Screener fetch failed (non-fatal): {}", e)
+        screened = []
+
+    # Source 3: LLM discovery proposals (already handles its own errors)
+    discovered = run_discovery_cycle(
+        positions=snapshot.positions,
+        watchlist=watchlist,
+        buying_power=snapshot.buying_power,
+    )
+
+    all_candidates = set(watchlist) | set(screened) | set(discovered)
+    held = {p["symbol"] for p in snapshot.positions}
+    new_candidates_raw = sorted(all_candidates - held)
+
+    # Apply 24h cooldown — skip symbols evaluated recently
+    new_candidates = filter_cooled_down(new_candidates_raw)
+
+    counts = {
+        "watchlist": len(watchlist),
+        "screener": len(screened),
+        "discovered": len(discovered),
+        "total_new": len(new_candidates),
+        "cooled_down": len(new_candidates_raw) - len(new_candidates),
+    }
+    logger.info(
+        "Gathered {} new candidates: {} watchlist, {} screener, {} discovered (deduped against {} held)",
+        len(new_candidates), len(watchlist), len(screened), len(discovered), len(held),
+    )
+    return new_candidates, counts
 
 
 def run_cycle(dry_run: bool = True) -> dict:
@@ -147,10 +232,15 @@ def run_cycle(dry_run: bool = True) -> dict:
         else:
             logger.info("Stage 5 complete: no stop-losses triggered")
 
+        # --- Stage 5.5: Gather buy candidates from watchlist + screener + LLM discovery ---
+        new_candidates, candidate_counts = gather_candidates(snapshot, dry_run)
+        logger.info("Stage 5.5 complete: {} new buy candidates gathered", len(new_candidates))
+
         # --- Stage 6: Consensus ---
-        # Candidates = current position symbols (for SELL/HOLD analysis).
-        # New BUY candidates require a screening module (Phase 5).
-        candidates = [p["symbol"] for p in snapshot.positions]
+        settings = get_settings()
+        # Combine: existing positions (for SELL/HOLD) + new candidates (for BUY)
+        position_symbols = [p["symbol"] for p in snapshot.positions]
+        candidates = position_symbols + [c for c in new_candidates if c not in position_symbols]
 
         consensus = None
         order_results = []
@@ -166,6 +256,8 @@ def run_cycle(dry_run: bool = True) -> dict:
                     "Stage 6 complete: {} approved trades, {} disagreements",
                     len(consensus.approved_trades), len(consensus.disagreed_symbols),
                 )
+                # Mark all evaluated symbols with cooldown so they aren't re-queried for 24h
+                mark_evaluated(candidates)
             except Exception as e:
                 logger.error("Consensus cycle failed: {}", e)
                 # Continue to post-trade snapshot -- consensus failure is not fatal
@@ -200,6 +292,35 @@ def run_cycle(dry_run: bool = True) -> dict:
         else:
             logger.info("Stage 7 skipped: no approved trades")
 
+        # --- Stage 7b: Bear-only put trades (bypass consensus — bull never recommends puts) ---
+        if consensus:
+            put_recs = [
+                r for r in consensus.bear_analysis.recommendations
+                if r.action == "BUY_PUT" and r.confidence >= settings.min_confidence
+            ]
+            if put_recs:
+                logger.info("Stage 7b: {} BUY_PUT recommendations from bear model", len(put_recs))
+                for rec in put_recs:
+                    try:
+                        result = execute_put_trade(
+                            client, rec, Decimal(str(snapshot.buying_power)), dry_run
+                        )
+                        order_results.append(result)
+                        logger.info(
+                            "Put trade {}: {} -- {}",
+                            rec.symbol, result["status"], result.get("reason", ""),
+                        )
+                    except Exception as e:
+                        logger.error("Put trade failed for {}: {}", rec.symbol, e)
+                        order_results.append({
+                            "status": "error",
+                            "ticker": rec.symbol,
+                            "action": "BUY_PUT",
+                            "reason": str(e),
+                        })
+            else:
+                logger.info("Stage 7b: no BUY_PUT recommendations from bear model")
+
         # --- Stage 8: Post-trade snapshot ---
         post_snapshot = None
         try:
@@ -222,6 +343,7 @@ def run_cycle(dry_run: bool = True) -> dict:
                 "nlv": snapshot.net_liquidating_value,
                 "positions_count": len(snapshot.positions),
             },
+            "candidates": candidate_counts,
             "stop_loss_results": stop_results,
             "consensus": {
                 "approved": len(consensus.approved_trades),

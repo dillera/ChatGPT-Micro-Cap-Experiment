@@ -1,8 +1,8 @@
 """Confidence-tiered position sizing.
 
 Computes whole share count from buying power, price, and consensus confidence.
-No trade below $50 notional (SIZE-04). High conviction (>= 0.75) caps at 40%
-of buying power (SIZE-02). Normal conviction (>= 0.60) caps at 20% (SIZE-03).
+Min trade value is configurable (default $10, SIZE-04). High conviction (>= 0.75)
+caps at 40% of buying power (SIZE-02). Normal conviction (>= 0.60) caps at 20% (SIZE-03).
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from loguru import logger
 
-MIN_TRADE_VALUE = Decimal("50.00")              # SIZE-04
+from src.config import get_settings
 HIGH_CONVICTION_THRESHOLD = 0.75                 # SIZE-02
 NORMAL_CONVICTION_THRESHOLD = 0.60               # SIZE-03
 HIGH_CONVICTION_MAX_PCT = Decimal("0.40")        # SIZE-02: up to 40%
@@ -22,6 +22,7 @@ def compute_shares(
     price: Decimal,
     confidence: float,
 ) -> int:
+    min_trade_value = Decimal(str(get_settings().min_trade_value))
     """Compute number of whole shares to buy based on confidence tier.
 
     Args:
@@ -47,20 +48,20 @@ def compute_shares(
         )
         return 0
 
-    if max_notional < MIN_TRADE_VALUE:
+    if max_notional < min_trade_value:
         logger.info(
             "Max notional ${:.2f} below ${} minimum",
-            max_notional, MIN_TRADE_VALUE,
+            max_notional, min_trade_value,
         )
         return 0
 
     shares = int(max_notional / price)  # Round down to whole shares
     notional = Decimal(shares) * price
 
-    if notional < MIN_TRADE_VALUE:
+    if notional < min_trade_value:
         logger.info(
             "Even {} share(s) = ${:.2f} below ${} minimum",
-            shares, notional, MIN_TRADE_VALUE,
+            shares, notional, min_trade_value,
         )
         return 0
 

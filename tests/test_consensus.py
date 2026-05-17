@@ -280,7 +280,7 @@ class TestQueryBull:
 
             mock_client.chat.completions.parse.assert_called_once()
             call_kwargs = mock_client.chat.completions.parse.call_args[1]
-            assert call_kwargs["model"] == "gpt-5.4-mini"
+            assert call_kwargs["model"] == "gpt-4o-mini"
             assert call_kwargs["response_format"].__name__ == "TradingAnalysis"
             assert result == sample_bull_analysis
 
