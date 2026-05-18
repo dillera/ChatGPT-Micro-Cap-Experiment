@@ -74,6 +74,16 @@ class Settings(BaseSettings):
     options_universe: list[str] = ["SPY", "QQQ", "IWM"]
     options_credit_otm_pct: float = 0.01         # short strike ~1% OTM for credit spreads
 
+    # Dynamic profit targets — time-of-day based close thresholds
+    # Debit spreads: theta works against you — close aggressively early
+    options_debit_target_early: float = 0.50    # before 11:00 ET (morning breakout — take the win)
+    options_debit_target_midday: float = 0.40   # 11:00–13:00 ET
+    options_debit_target_late: float = 0.30     # after 13:00 ET (theta eating value — take what's left)
+    # Credit spreads: theta works for you — let it cook early, lock in late
+    options_credit_target_early: float = 0.25   # before 12:00 ET (too early, let decay run)
+    options_credit_target_midday: float = 0.40  # 12:00–14:00 ET
+    options_credit_target_late: float = 0.60    # after 14:00 ET (rapid 0DTE decay, high achievable target)
+
     # Trading windows (Eastern time as HH:MM strings)
     orb_entry_start: str = "09:45"
     orb_entry_end: str = "10:15"

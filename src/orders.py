@@ -791,13 +791,19 @@ def check_and_close_open_spreads(
         long_mid = (long_q[0] + long_q[1]) / 2
         short_mid = (short_q[0] + short_q[1]) / 2
 
-        from src.daily_target import compute_spread_pnl
+        from src.daily_target import compute_spread_pnl, get_dynamic_profit_target
         current_pnl = compute_spread_pnl(spread, long_mid, short_mid)
+
+        target_pct = get_dynamic_profit_target(spread.spread_type, now_et)
+        profit_target_dollars = spread.max_profit * target_pct
 
         close_reason = None
 
-        if current_pnl >= spread.max_profit * spread.target_exit_pct:
-            close_reason = f"profit_target ({current_pnl:.2f} >= {spread.max_profit * spread.target_exit_pct:.2f})"
+        if current_pnl >= profit_target_dollars:
+            close_reason = (
+                f"profit_target ({current_pnl:.2f} >= {profit_target_dollars:.2f} "
+                f"[{target_pct:.0%} dynamic])"
+            )
         elif current_pnl <= -spread.max_loss:
             close_reason = f"stop_loss ({current_pnl:.2f} <= -{spread.max_loss:.2f})"
         elif spread.dte_at_open == 0 and now_et.time() >= eod_time:
@@ -809,10 +815,8 @@ def check_and_close_open_spreads(
             results.append(r)
         else:
             logger.debug(
-                "Spread {} OK: pnl=${:.2f} (target=${:.2f}, stop=-${:.2f})",
-                spread.id, current_pnl,
-                spread.max_profit * spread.target_exit_pct,
-                spread.max_loss,
+                "Spread {} OK: pnl=${:.2f} (dynamic_target=${:.2f} [{:.0%}], stop=-${:.2f})",
+                spread.id, current_pnl, profit_target_dollars, target_pct, spread.max_loss,
             )
 
     return results

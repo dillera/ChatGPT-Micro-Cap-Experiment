@@ -138,6 +138,40 @@ def should_take_trade(state: DailyTargetState, window: str) -> tuple[bool, str]:
     return True, f"OK — {state.trades_today}/{state.max_trades} trades, P&L=${state.realized_pnl:.2f}"
 
 
+def get_dynamic_profit_target(spread_type: str, now_et: datetime | None = None) -> float:
+    """Return the profit-close threshold for a spread based on type and time of day.
+
+    Debit spreads (CALL_DEBIT, PUT_DEBIT):
+      Theta works against you — close aggressively early.
+      before 11:00 → 50%  |  11:00–13:00 → 40%  |  after 13:00 → 30%
+
+    Credit spreads (CALL_CREDIT, PUT_CREDIT):
+      Theta works for you — let it cook early, lock in late.
+      before 12:00 → 25%  |  12:00–14:00 → 40%  |  after 14:00 → 60%
+    """
+    from datetime import time as dtime
+
+    settings = get_settings()
+    if now_et is None:
+        now_et = datetime.now(ET)
+    t = now_et.time()
+
+    is_credit = spread_type in ("CALL_CREDIT", "PUT_CREDIT")
+
+    if is_credit:
+        if t < dtime(12, 0):
+            return settings.options_credit_target_early
+        if t < dtime(14, 0):
+            return settings.options_credit_target_midday
+        return settings.options_credit_target_late
+    else:
+        if t < dtime(11, 0):
+            return settings.options_debit_target_early
+        if t < dtime(13, 0):
+            return settings.options_debit_target_midday
+        return settings.options_debit_target_late
+
+
 def compute_spread_pnl(
     spread: SpreadPosition,
     current_long_mid: float,
