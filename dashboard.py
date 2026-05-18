@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src.config import get_settings
+from src.config import get_settings, reset_settings
 from src.db import get_db, init_db
 from src.run_logger import RUN_LOG_DIR
 from src.screener import screen_sector
@@ -39,6 +39,47 @@ settings = get_settings()
 # ---------------------------------------------------------------------------
 st.sidebar.markdown(f"**Database:** `{settings.db_path}`")
 if st.sidebar.button("Refresh Data"):
+    st.rerun()
+
+# ---------------------------------------------------------------------------
+# LLM Model Settings
+# ---------------------------------------------------------------------------
+st.sidebar.divider()
+st.sidebar.subheader("LLM Models")
+
+OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-5.4-mini", "o1", "o3-mini"]
+ANTHROPIC_MODELS = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"]
+
+current_oai = settings.openai_model
+current_ant = settings.anthropic_model
+
+oai_idx = OPENAI_MODELS.index(current_oai) if current_oai in OPENAI_MODELS else 0
+ant_idx = ANTHROPIC_MODELS.index(current_ant) if current_ant in ANTHROPIC_MODELS else 0
+
+selected_oai = st.sidebar.selectbox("OpenAI (Bull)", OPENAI_MODELS, index=oai_idx)
+selected_ant = st.sidebar.selectbox("Anthropic (Bear)", ANTHROPIC_MODELS, index=ant_idx)
+
+if st.sidebar.button("Save Model Settings"):
+    env_path = __import__("pathlib").Path(".env")
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+    else:
+        lines = []
+    updated = {"OPENAI_MODEL": False, "ANTHROPIC_MODEL": False}
+    for i, line in enumerate(lines):
+        if line.startswith("OPENAI_MODEL="):
+            lines[i] = f"OPENAI_MODEL={selected_oai}"
+            updated["OPENAI_MODEL"] = True
+        elif line.startswith("ANTHROPIC_MODEL="):
+            lines[i] = f"ANTHROPIC_MODEL={selected_ant}"
+            updated["ANTHROPIC_MODEL"] = True
+    if not updated["OPENAI_MODEL"]:
+        lines.append(f"OPENAI_MODEL={selected_oai}")
+    if not updated["ANTHROPIC_MODEL"]:
+        lines.append(f"ANTHROPIC_MODEL={selected_ant}")
+    env_path.write_text("\n".join(lines) + "\n")
+    reset_settings()
+    st.sidebar.success(f"Saved — Bull: {selected_oai} / Bear: {selected_ant}")
     st.rerun()
 
 # ---------------------------------------------------------------------------

@@ -204,7 +204,6 @@ class TastytradeClient:
         from tastytrade.instruments import Equity
         from tastytrade.order import (
             NewOrder,
-            NewComplexOrder,
             OrderAction,
             OrderType,
             OrderTimeInForce,
@@ -212,26 +211,15 @@ class TastytradeClient:
 
         symbol = await Equity.get(self._session, ticker)
         opening = symbol.build_leg(Decimal(str(shares)), OrderAction.BUY_TO_OPEN)
-        closing = symbol.build_leg(Decimal(str(shares)), OrderAction.SELL_TO_CLOSE)
 
-        otoco = NewComplexOrder(
-            trigger_order=NewOrder(
-                time_in_force=OrderTimeInForce.DAY,
-                order_type=OrderType.LIMIT,
-                legs=[opening],
-                price=-limit_price,  # negative = debit (buy)
-            ),
-            orders=[
-                NewOrder(
-                    time_in_force=OrderTimeInForce.GTC,
-                    order_type=OrderType.STOP,
-                    legs=[closing],
-                    stop_trigger=stop_price,
-                ),
-            ],
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[opening],
+            price=-limit_price,  # negative = debit (buy)
         )
-        response = await self._account.place_complex_order(
-            self._session, otoco, dry_run=dry_run
+        response = await self._account.place_order(
+            self._session, order, dry_run=dry_run
         )
         return {
             "order_response": response,
@@ -289,6 +277,438 @@ class TastytradeClient:
             "ticker": ticker,
             "shares": shares,
             "limit_price": float(limit_price),
+            "dry_run": dry_run,
+        }
+
+    def get_put_contract(self, symbol: str, target_dte: int = 30) -> dict | None:
+        """Find the ATM put contract closest to target_dte for a symbol.
+
+        Returns a dict with occ_symbol, streamer_symbol, strike, expiry, dte,
+        and underlying_price — or None if no chain is found.
+        """
+        return self._run(self._async_get_put_contract(symbol, target_dte))
+
+    async def _async_get_put_contract(self, symbol: str, target_dte: int) -> dict | None:
+        import yfinance as yf
+        from tastytrade.instruments import NestedOptionChain
+
+        try:
+            price = yf.Ticker(symbol).fast_info.last_price
+        except Exception as e:
+            logger.warning("Could not get underlying price for {}: {}", symbol, e)
+            return None
+
+        if not price or price <= 0:
+            logger.warning("Invalid underlying price for {}: {}", symbol, price)
+            return None
+
+        # Price gate before fetching chain — avoids wasted API call
+        min_price = get_settings().options_min_underlying_price
+        if price < min_price:
+            logger.info("Skipping options chain for {}: ${:.2f} below ${:.2f} minimum", symbol, price, min_price)
+            return None
+
+        try:
+            chains = await NestedOptionChain.get(self._session, symbol)
+        except Exception as e:
+            logger.warning("No options chain for {}: {}", symbol, e)
+            return None
+
+        if not chains or not chains[0].expirations:
+            logger.warning("Empty options chain for {}", symbol)
+            return None
+
+        chain = chains[0]
+
+        # Pick expiration closest to target_dte
+        best_exp = min(chain.expirations, key=lambda e: abs(e.days_to_expiration - target_dte))
+        if not best_exp.strikes:
+            logger.warning("No strikes for {} expiry {}", symbol, best_exp.expiration_date)
+            return None
+
+        # Pick put strike closest to ATM
+        best_strike = min(best_exp.strikes, key=lambda s: abs(float(s.strike_price) - price))
+
+        logger.info(
+            "Selected put for {}: strike={} expiry={} DTE={}",
+            symbol, best_strike.strike_price, best_exp.expiration_date, best_exp.days_to_expiration,
+        )
+        return {
+            "occ_symbol": best_strike.put,
+            "streamer_symbol": best_strike.put_streamer_symbol,
+            "strike": float(best_strike.strike_price),
+            "expiry": str(best_exp.expiration_date),
+            "dte": best_exp.days_to_expiration,
+            "underlying_price": price,
+        }
+
+    def place_put_order(
+        self,
+        occ_symbol: str,
+        contracts: int,
+        limit_price: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a DAY limit buy-to-open for a put contract."""
+        return self._run(self._async_place_put_order(occ_symbol, contracts, limit_price, dry_run))
+
+    async def _async_place_put_order(
+        self,
+        occ_symbol: str,
+        contracts: int,
+        limit_price: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        option = await Option.get(self._session, occ_symbol)
+
+        if getattr(option, "is_closing_only", False):
+            raise ValueError(f"{occ_symbol} is closing-only — cannot open new put position")
+
+        leg = option.build_leg(Decimal(str(contracts)), OrderAction.BUY_TO_OPEN)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[leg],
+            price=-limit_price,  # negative = debit (buying premium)
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "occ_symbol": occ_symbol,
+            "contracts": contracts,
+            "limit_price": float(limit_price),
+            "dry_run": dry_run,
+        }
+
+    def get_option_chain(self, symbol: str, dte_target: int = 0) -> dict | None:
+        """Fetch full option chain for a symbol at target DTE.
+
+        Returns {underlying_price, expiry, dte,
+                 calls: [{strike, occ_symbol, streamer_symbol}],
+                 puts:  [{strike, occ_symbol, streamer_symbol}]}
+        Falls back to dte_target=1 if 0DTE unavailable for this symbol/day.
+        Returns None if chain cannot be fetched.
+        """
+        return self._run(self._async_get_option_chain(symbol, dte_target))
+
+    async def _async_get_option_chain(self, symbol: str, dte_target: int) -> dict | None:
+        import yfinance as yf
+        from tastytrade.instruments import NestedOptionChain
+
+        try:
+            price = yf.Ticker(symbol).fast_info.last_price
+        except Exception as e:
+            logger.warning("Could not get underlying price for {}: {}", symbol, e)
+            return None
+
+        if not price or price <= 0:
+            logger.warning("Invalid underlying price for {}: {}", symbol, price)
+            return None
+
+        try:
+            chains = await NestedOptionChain.get(self._session, symbol)
+        except Exception as e:
+            logger.warning("No options chain for {}: {}", symbol, e)
+            return None
+
+        if not chains or not chains[0].expirations:
+            return None
+
+        chain = chains[0]
+
+        # Try exact dte_target first; fall back to 1DTE if 0DTE unavailable
+        candidates = sorted(chain.expirations, key=lambda e: abs(e.days_to_expiration - dte_target))
+        best_exp = candidates[0]
+        if dte_target == 0 and best_exp.days_to_expiration > 1:
+            logger.info("0DTE not available for {}, falling back to 1DTE", symbol)
+            candidates = sorted(chain.expirations, key=lambda e: abs(e.days_to_expiration - 1))
+            best_exp = candidates[0]
+
+        if not best_exp.strikes:
+            return None
+
+        calls = []
+        puts = []
+        for s in best_exp.strikes:
+            strike = float(s.strike_price)
+            if s.call and s.call_streamer_symbol:
+                calls.append({"strike": strike, "occ_symbol": s.call, "streamer_symbol": s.call_streamer_symbol})
+            if s.put and s.put_streamer_symbol:
+                puts.append({"strike": strike, "occ_symbol": s.put, "streamer_symbol": s.put_streamer_symbol})
+
+        logger.info(
+            "Option chain for {}: expiry={} DTE={} ({} calls, {} puts)",
+            symbol, best_exp.expiration_date, best_exp.days_to_expiration, len(calls), len(puts),
+        )
+        return {
+            "underlying_price": price,
+            "expiry": str(best_exp.expiration_date),
+            "dte": best_exp.days_to_expiration,
+            "calls": sorted(calls, key=lambda x: x["strike"]),
+            "puts": sorted(puts, key=lambda x: x["strike"]),
+        }
+
+    def get_spread_quotes(
+        self,
+        long_streamer: str,
+        short_streamer: str,
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        """Fetch bid/ask for two option legs concurrently.
+
+        Returns ((long_bid, long_ask), (short_bid, short_ask)).
+        """
+        return self._run(self._async_get_spread_quotes(long_streamer, short_streamer))
+
+    async def _async_get_spread_quotes(
+        self,
+        long_streamer: str,
+        short_streamer: str,
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
+        from tastytrade import DXLinkStreamer
+        from tastytrade.dxfeed import Quote
+
+        quotes: dict[str, tuple[float, float]] = {}
+        targets = {long_streamer, short_streamer}
+
+        async with DXLinkStreamer(self._session) as streamer:
+            await streamer.subscribe(Quote, list(targets))
+            async for quote in streamer.listen(Quote):
+                if quote.event_symbol in targets:
+                    bid = float(quote.bid_price or 0)
+                    ask = float(quote.ask_price or 0)
+                    quotes[quote.event_symbol] = (bid, ask)
+                if len(quotes) == len(targets):
+                    break
+
+        long_q = quotes.get(long_streamer, (0.0, 0.0))
+        short_q = quotes.get(short_streamer, (0.0, 0.0))
+        return long_q, short_q
+
+    def place_vertical_spread(
+        self,
+        long_occ: str,
+        short_occ: str,
+        contracts: int,
+        net_debit: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a two-leg debit vertical spread as a single order.
+
+        Price = -net_debit (TastyTrade convention: negative = debit paid).
+        Uses BUY_TO_OPEN (long) + SELL_TO_OPEN (short) in one NewOrder.
+        Returns order response dict.
+        """
+        return self._run(
+            self._async_place_vertical_spread(long_occ, short_occ, contracts, net_debit, dry_run)
+        )
+
+    async def _async_place_vertical_spread(
+        self,
+        long_occ: str,
+        short_occ: str,
+        contracts: int,
+        net_debit: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        long_opt = await Option.get(self._session, long_occ)
+        short_opt = await Option.get(self._session, short_occ)
+
+        if getattr(long_opt, "is_closing_only", False):
+            raise ValueError(f"{long_occ} is closing-only — cannot open long leg")
+
+        qty = Decimal(str(contracts))
+        long_leg = long_opt.build_leg(qty, OrderAction.BUY_TO_OPEN)
+        short_leg = short_opt.build_leg(qty, OrderAction.SELL_TO_OPEN)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[long_leg, short_leg],
+            price=-net_debit,  # negative = debit
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "long_occ": long_occ,
+            "short_occ": short_occ,
+            "contracts": contracts,
+            "net_debit": float(net_debit),
+            "dry_run": dry_run,
+        }
+
+    def place_spread_close(
+        self,
+        long_occ: str,
+        short_occ: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Close a vertical spread: SELL_TO_CLOSE long + BUY_TO_CLOSE short.
+
+        Price = net_credit (positive = credit received).
+        Returns order response dict.
+        """
+        return self._run(
+            self._async_place_spread_close(long_occ, short_occ, contracts, net_credit, dry_run)
+        )
+
+    async def _async_place_spread_close(
+        self,
+        long_occ: str,
+        short_occ: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        long_opt = await Option.get(self._session, long_occ)
+        short_opt = await Option.get(self._session, short_occ)
+
+        qty = Decimal(str(contracts))
+        long_leg = long_opt.build_leg(qty, OrderAction.SELL_TO_CLOSE)
+        short_leg = short_opt.build_leg(qty, OrderAction.BUY_TO_CLOSE)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[long_leg, short_leg],
+            price=net_credit,  # positive = credit received
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "long_occ": long_occ,
+            "short_occ": short_occ,
+            "contracts": contracts,
+            "net_credit": float(net_credit),
+            "dry_run": dry_run,
+        }
+
+    def place_iron_condor(
+        self,
+        short_put: str,
+        long_put: str,
+        short_call: str,
+        long_call: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a 4-leg iron condor as a single order.
+
+        Legs: SELL short_put, BUY long_put, SELL short_call, BUY long_call.
+        Price = +net_credit (total credit from both sides, positive).
+        """
+        return self._run(
+            self._async_place_iron_condor(
+                short_put, long_put, short_call, long_call, contracts, net_credit, dry_run
+            )
+        )
+
+    async def _async_place_iron_condor(
+        self,
+        short_put: str,
+        long_put: str,
+        short_call: str,
+        long_call: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        sp_opt = await Option.get(self._session, short_put)
+        lp_opt = await Option.get(self._session, long_put)
+        sc_opt = await Option.get(self._session, short_call)
+        lc_opt = await Option.get(self._session, long_call)
+
+        for opt, occ in [(sp_opt, short_put), (sc_opt, short_call)]:
+            if getattr(opt, "is_closing_only", False):
+                raise ValueError(f"{occ} is closing-only — cannot open short leg")
+
+        qty = Decimal(str(contracts))
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[
+                sp_opt.build_leg(qty, OrderAction.SELL_TO_OPEN),
+                lp_opt.build_leg(qty, OrderAction.BUY_TO_OPEN),
+                sc_opt.build_leg(qty, OrderAction.SELL_TO_OPEN),
+                lc_opt.build_leg(qty, OrderAction.BUY_TO_OPEN),
+            ],
+            price=net_credit,
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "short_put": short_put, "long_put": long_put,
+            "short_call": short_call, "long_call": long_call,
+            "contracts": contracts, "net_credit": float(net_credit), "dry_run": dry_run,
+        }
+
+    def place_credit_spread(
+        self,
+        short_occ: str,
+        long_occ: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a two-leg credit vertical spread as a single order.
+
+        short_occ = the OTM leg we sell (SELL_TO_OPEN).
+        long_occ  = the further OTM protection leg (BUY_TO_OPEN).
+        Price = +net_credit (positive = credit received).
+        """
+        return self._run(
+            self._async_place_credit_spread(short_occ, long_occ, contracts, net_credit, dry_run)
+        )
+
+    async def _async_place_credit_spread(
+        self,
+        short_occ: str,
+        long_occ: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        short_opt = await Option.get(self._session, short_occ)
+        long_opt = await Option.get(self._session, long_occ)
+
+        if getattr(short_opt, "is_closing_only", False):
+            raise ValueError(f"{short_occ} is closing-only — cannot open short leg")
+
+        qty = Decimal(str(contracts))
+        short_leg = short_opt.build_leg(qty, OrderAction.SELL_TO_OPEN)
+        long_leg = long_opt.build_leg(qty, OrderAction.BUY_TO_OPEN)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[short_leg, long_leg],
+            price=net_credit,  # positive = credit received
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "short_occ": short_occ,
+            "long_occ": long_occ,
+            "contracts": contracts,
+            "net_credit": float(net_credit),
             "dry_run": dry_run,
         }
 

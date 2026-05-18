@@ -36,6 +36,9 @@ def _base_patches(mock_broker, mock_consensus_result):
         "src.cycle.run_consensus_cycle": MagicMock(
             return_value=mock_consensus_result
         ),
+        "src.cycle.get_active_symbols": MagicMock(return_value=["ABEO", "RXRX"]),
+        "src.cycle.get_screener_candidates": MagicMock(return_value=["VERI", "SLDB"]),
+        "src.cycle.run_discovery_cycle": MagicMock(return_value=["FREQ"]),
     }
 
 
@@ -50,6 +53,9 @@ class TestHappyPath:
              patch("src.cycle.TastytradeClient", patches["src.cycle.TastytradeClient"]), \
              patch("src.cycle.init_db", patches["src.cycle.init_db"]), \
              patch("src.cycle.run_consensus_cycle", patches["src.cycle.run_consensus_cycle"]), \
+             patch("src.cycle.get_active_symbols", patches["src.cycle.get_active_symbols"]), \
+             patch("src.cycle.get_screener_candidates", patches["src.cycle.get_screener_candidates"]), \
+             patch("src.cycle.run_discovery_cycle", patches["src.cycle.run_discovery_cycle"]), \
              patch("src.cycle.datetime") as mock_dt, \
              patch("src.cycle.LOCK_PATH", Path(tempfile.mktemp())):
             mock_dt.now.return_value = datetime(2026, 3, 18, 10, 0, 0)  # Wednesday
@@ -62,6 +68,10 @@ class TestHappyPath:
         assert result["dry_run"] is True
         assert result["account"] is not None
         assert result["account"]["nlv"] == 500.0
+        assert result["candidates"] is not None
+        assert result["candidates"]["watchlist"] == 2
+        assert result["candidates"]["screener"] == 2
+        assert result["candidates"]["discovered"] == 1
         assert result["consensus"] is not None
         assert result["order_results"] is not None
         assert result["circuit_breaker"] is not None

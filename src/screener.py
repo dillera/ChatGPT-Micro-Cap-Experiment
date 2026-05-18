@@ -15,65 +15,34 @@ from src.db import get_db
 from src.otc_filter import validate_symbols
 
 
-# Sector-to-yfinance screener query mapping
-# These map to yfinance Screener predefined keys
-_SECTOR_QUERIES: dict[str, str] = {
-    "biotech": "most_actives",
-    "tech": "most_actives",
+# Sector-to-yfinance screen() query mapping (yfinance >= 1.0)
+_SECTOR_QUERIES: dict[str, list[str]] = {
+    "biotech": ["aggressive_small_caps", "small_cap_gainers"],
+    "tech": ["growth_technology_stocks", "aggressive_small_caps"],
 }
 
 
-def _fetch_sector_tickers(sector: str) -> dict:
-    """Fetch candidate tickers for a sector from yfinance.
+def _fetch_sector_quotes(sector: str) -> list[dict]:
+    """Fetch raw quote dicts for a sector using yf.screen().
 
-    Returns:
-        Dict mapping symbol -> mock ticker-like object with .info dict.
-        In production, uses yf.Screener + yf.Ticker for info lookup.
+    Returns a list of quote dicts — each already has marketCap,
+    averageDailyVolume10Day, exchange, and symbol inline.
     """
     import yfinance as yf
 
-    settings = get_settings()
-    query_key = _SECTOR_QUERIES.get(sector, "most_actives")
-
-    try:
-        screener = yf.Screener()
-        screener.set_default_body(query_key)
-        response = screener.response
-        symbols = [
-            q.get("symbol", "")
-            for q in response.get("quotes", [])
-            if q.get("symbol")
-        ]
-    except Exception:
-        # yfinance screener API is unreliable; try alternate approach
-        logger.warning("yfinance Screener failed for sector={}, trying fallback", sector)
+    queries = _SECTOR_QUERIES.get(sector, ["small_cap_gainers"])
+    for query_key in queries:
         try:
-            # Fallback: use a sector ETF to find holdings
-            screener = yf.Screener()
-            screener.set_default_body("small_cap_gainers")
-            response = screener.response
-            symbols = [
-                q.get("symbol", "")
-                for q in response.get("quotes", [])
-                if q.get("symbol")
-            ]
-        except Exception as e2:
-            logger.warning("yfinance fallback also failed for sector={}: {}", sector, e2)
-            return {}
+            response = yf.screen(query_key)
+            quotes = response.get("quotes", [])
+            if quotes:
+                logger.info("Screener: {} returned {} quotes for sector={}", query_key, len(quotes), sector)
+                return quotes
+        except Exception as e:
+            logger.warning("yf.screen({}) failed for sector={}: {}", query_key, sector, e)
 
-    # Fetch info for each candidate (capped)
-    symbols = symbols[: settings.screener_max_results_per_sector * 2]
-    result = {}
-    for sym in symbols:
-        try:
-            ticker = yf.Ticker(sym)
-            # Access .info to pre-populate
-            _ = ticker.info
-            result[sym] = ticker
-        except Exception:
-            continue
-
-    return result
+    logger.warning("All screener queries failed for sector={}", sector)
+    return []
 
 
 def screen_sector(sector: str) -> list[str]:
@@ -101,21 +70,23 @@ def screen_sector(sector: str) -> list[str]:
 
         # Cache miss -- fetch from yfinance
         try:
-            raw_tickers = _fetch_sector_tickers(sector)
+            quotes = _fetch_sector_quotes(sector)
         except Exception as e:
             logger.warning("Screener fetch failed for sector={}: {}", sector, e)
             return []
 
-        if not raw_tickers:
+        if not quotes:
             return []
 
-        # Filter by market cap and volume
+        # Filter by market cap and volume (data is inline in each quote dict)
         candidates = []
-        for sym, ticker in raw_tickers.items():
-            info = ticker.info if hasattr(ticker, "info") else {}
-            market_cap = info.get("marketCap", 0) or 0
-            avg_volume = info.get("averageDailyVolume10Day", 0) or 0
-            exchange = info.get("exchange")
+        for q in quotes:
+            sym = q.get("symbol", "")
+            if not sym:
+                continue
+            market_cap = q.get("marketCap", 0) or 0
+            avg_volume = q.get("averageDailyVolume10Day", 0) or 0
+            exchange = q.get("exchange")
 
             if market_cap > settings.screener_max_market_cap:
                 continue

@@ -112,6 +112,53 @@ CREATE TABLE IF NOT EXISTS screener_cache (
 );
 
 CREATE INDEX IF NOT EXISTS idx_screener_cache_sector ON screener_cache(sector);
+
+CREATE TABLE IF NOT EXISTS symbol_cooldown (
+    symbol          TEXT PRIMARY KEY,
+    last_evaluated_at TEXT NOT NULL,
+    next_eval_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spread_positions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol          TEXT NOT NULL,
+    spread_type     TEXT NOT NULL,
+    long_strike     REAL NOT NULL,
+    short_strike    REAL NOT NULL,
+    expiry          TEXT NOT NULL,
+    dte_at_open     INTEGER NOT NULL,
+    contracts       INTEGER NOT NULL DEFAULT 1,
+    debit_paid      REAL NOT NULL,
+    max_profit      REAL NOT NULL,
+    max_loss        REAL NOT NULL,
+    target_exit_pct REAL NOT NULL DEFAULT 0.50,
+    opened_at       TEXT NOT NULL,
+    closed_at       TEXT,
+    status          TEXT NOT NULL DEFAULT 'OPEN',
+    order_id        TEXT,
+    long_occ        TEXT NOT NULL,
+    short_occ       TEXT NOT NULL,
+    daily_session   TEXT,
+    entry_delta     REAL
+);
+
+CREATE TABLE IF NOT EXISTS daily_options_target (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_date     TEXT NOT NULL UNIQUE,
+    target_amount   REAL NOT NULL DEFAULT 100.0,
+    realized_pnl    REAL NOT NULL DEFAULT 0.0,
+    unrealized_pnl  REAL NOT NULL DEFAULT 0.0,
+    trades_today    INTEGER NOT NULL DEFAULT 0,
+    max_trades      INTEGER NOT NULL DEFAULT 3,
+    target_hit      INTEGER NOT NULL DEFAULT 0,
+    stop_loss_hit   INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_spread_positions_symbol ON spread_positions(symbol);
+CREATE INDEX IF NOT EXISTS idx_spread_positions_status ON spread_positions(status);
+CREATE INDEX IF NOT EXISTS idx_spread_positions_opened_at ON spread_positions(opened_at);
+CREATE INDEX IF NOT EXISTS idx_daily_options_target_date ON daily_options_target(target_date);
 """
 
 
