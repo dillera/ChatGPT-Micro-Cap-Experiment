@@ -99,6 +99,10 @@ def evaluate_orb_signal(ctx: MarketContext, config) -> StrategySignal | None:
     breakout_down = (ctx.orb_low - ctx.underlying_price) / ctx.orb_low
 
     if breakout_up >= 0.0015:
+        ok, mom_reason = passes_momentum_filter(ctx, "CALL", is_credit=False)
+        if not ok:
+            logger.info("ORB CALL signal suppressed by momentum filter: {}", mom_reason)
+            return None
         conf = min(0.80, 0.55 + breakout_up * 10)
         reason = (
             f"Price ${ctx.underlying_price:.2f} broke ORB high ${ctx.orb_high:.2f} "
@@ -116,6 +120,10 @@ def evaluate_orb_signal(ctx: MarketContext, config) -> StrategySignal | None:
         )
 
     if breakout_down >= 0.0015:
+        ok, mom_reason = passes_momentum_filter(ctx, "PUT", is_credit=False)
+        if not ok:
+            logger.info("ORB PUT signal suppressed by momentum filter: {}", mom_reason)
+            return None
         conf = min(0.80, 0.55 + breakout_down * 10)
         reason = (
             f"Price ${ctx.underlying_price:.2f} broke ORB low ${ctx.orb_low:.2f} "
@@ -167,6 +175,10 @@ def evaluate_mean_reversion_signal(
 
     # Mean reversion: extended move away from VWAP, expect snap-back
     if deviation <= -0.005:
+        ok, mom_reason = passes_momentum_filter(ctx, "CALL", is_credit=False)
+        if not ok:
+            logger.info("Mid-day CALL reversion suppressed by momentum filter: {}", mom_reason)
+            return None
         reason = (
             f"Price ${ctx.underlying_price:.2f} is {abs(deviation):.2%} below VWAP ${ctx.vwap:.2f} "
             f"— expecting mean reversion bounce (call debit spread)"
@@ -183,6 +195,10 @@ def evaluate_mean_reversion_signal(
         )
 
     if deviation >= 0.005:
+        ok, mom_reason = passes_momentum_filter(ctx, "PUT", is_credit=False)
+        if not ok:
+            logger.info("Mid-day PUT reversion suppressed by momentum filter: {}", mom_reason)
+            return None
         reason = (
             f"Price ${ctx.underlying_price:.2f} is {deviation:.2%} above VWAP ${ctx.vwap:.2f} "
             f"— expecting mean reversion pullback (put debit spread)"
@@ -228,6 +244,12 @@ def evaluate_preclose_signal(
         return None
 
     direction = "CALL" if ctx.trend_bias == "BULLISH" else "PUT"
+
+    ok, mom_reason = passes_momentum_filter(ctx, direction, is_credit=False)
+    if not ok:
+        logger.info("Pre-close {} signal suppressed by momentum filter: {}", direction, mom_reason)
+        return None
+
     reason = (
         f"Pre-close positioning: {ctx.trend_bias} trend intact at ${ctx.underlying_price:.2f} "
         f"(VIX={ctx.vix:.1f})"
@@ -243,6 +265,56 @@ def evaluate_preclose_signal(
         suggested_dte=0,
         suggested_width=config.options_spread_width,
     )
+
+
+def passes_momentum_filter(
+    ctx: MarketContext,
+    direction: str,
+    is_credit: bool = False,
+) -> tuple[bool, str]:
+    """RSI + VWAP-slope momentum gate applied before any spread entry.
+
+    Debit spreads require momentum to confirm direction:
+      CALL debit: RSI >= 45 AND vwap_slope >= 0
+      PUT  debit: RSI <= 55 AND vwap_slope <= 0
+
+    Credit spreads only reject on extreme opposing momentum:
+      PUT credit  (bull put):  RSI >= 30 AND vwap_slope >= -0.001
+      CALL credit (bear call): RSI <= 70 AND vwap_slope <= +0.001
+
+    If both indicators are unavailable the filter passes (fail-open).
+    Returns (passes: bool, reason: str).
+    """
+    rsi = ctx.rsi_14
+    slope = ctx.vwap_slope
+
+    if rsi is None and slope is None:
+        return True, "momentum data unavailable — filter bypassed"
+
+    if is_credit:
+        if direction == "PUT":
+            if rsi is not None and rsi < 30:
+                return False, f"credit PUT blocked: RSI {rsi:.1f} < 30 (bearish momentum too strong)"
+            if slope is not None and slope < -0.001:
+                return False, f"credit PUT blocked: VWAP slope {slope:.4f} < -0.001 (strong downtrend)"
+        else:  # CALL credit
+            if rsi is not None and rsi > 70:
+                return False, f"credit CALL blocked: RSI {rsi:.1f} > 70 (bullish momentum too strong)"
+            if slope is not None and slope > 0.001:
+                return False, f"credit CALL blocked: VWAP slope {slope:.4f} > 0.001 (strong uptrend)"
+    else:
+        if direction == "CALL":
+            if rsi is not None and rsi < 45:
+                return False, f"debit CALL blocked: RSI {rsi:.1f} < 45 (insufficient bullish momentum)"
+            if slope is not None and slope < 0:
+                return False, f"debit CALL blocked: VWAP slope {slope:.4f} < 0 (downward slope)"
+        else:  # PUT debit
+            if rsi is not None and rsi > 55:
+                return False, f"debit PUT blocked: RSI {rsi:.1f} > 55 (insufficient bearish momentum)"
+            if slope is not None and slope > 0:
+                return False, f"debit PUT blocked: VWAP slope {slope:.4f} > 0 (upward slope)"
+
+    return True, "momentum filter passed"
 
 
 def evaluate_credit_spread_signal(ctx: MarketContext, config) -> StrategySignal | None:
@@ -278,6 +350,11 @@ def evaluate_credit_spread_signal(ctx: MarketContext, config) -> StrategySignal 
             f"Credit put spread: {ctx.trend_bias} bias at ${ctx.underlying_price:.2f} "
             f"(VIX={ctx.vix:.1f}) — selling OTM put {config.options_credit_otm_pct:.0%} below price"
         )
+
+    ok, mom_reason = passes_momentum_filter(ctx, direction, is_credit=True)
+    if not ok:
+        logger.info("Credit spread {} suppressed by momentum filter: {}", strategy, mom_reason)
+        return None
 
     logger.info("Credit spread signal: {} — {}", strategy, reason)
     return StrategySignal(

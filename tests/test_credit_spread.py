@@ -14,7 +14,8 @@ from src.options_strategy import (
 )
 
 
-def _make_ctx(trend_bias="NEUTRAL", market_regime="NORMAL", vix=15.0, price=500.0) -> MarketContext:
+def _make_ctx(trend_bias="NEUTRAL", market_regime="NORMAL", vix=15.0, price=500.0,
+              rsi_14=50.0, vwap_slope=0.0) -> MarketContext:
     return MarketContext(
         timestamp="2026-01-01T10:00:00",
         symbol="SPY",
@@ -29,6 +30,8 @@ def _make_ctx(trend_bias="NEUTRAL", market_regime="NORMAL", vix=15.0, price=500.
         below_orb=None,
         spy_1d_change_pct=0.0,
         vwap=price,
+        rsi_14=rsi_14,
+        vwap_slope=vwap_slope,
     )
 
 

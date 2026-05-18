@@ -31,6 +31,8 @@ class MarketContext:
     below_orb: bool | None      # price < orb_low
     spy_1d_change_pct: float
     vwap: float | None
+    rsi_14: float | None        # 14-period RSI on 5-min bars
+    vwap_slope: float | None    # fractional VWAP change over last 6 bars (30 min)
 
 
 def fetch_market_context(symbol: str = "SPY") -> MarketContext:
@@ -94,13 +96,18 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
     vwap = compute_vwap(bars_today) if not bars_today.empty else None
     trend_bias = get_trend_bias(vwap, underlying_price) if vwap else "NEUTRAL"
 
+    rsi_14 = _compute_rsi(bars_today["Close"]) if not bars_today.empty else None
+    vwap_slope = _compute_vwap_slope(bars_today) if not bars_today.empty else None
+
     logger.info(
-        "Market context: {} @ ${:.2f} | VIX={:.1f} ({}) | ORB [{} - {}] | {} | VWAP={}",
+        "Market context: {} @ ${:.2f} | VIX={:.1f} ({}) | ORB [{} - {}] | {} | VWAP={} | RSI={} | slope={}",
         symbol, underlying_price, vix, regime,
         f"${orb_low:.2f}" if orb_low else "N/A",
         f"${orb_high:.2f}" if orb_high else "N/A",
         trend_bias,
         f"${vwap:.2f}" if vwap else "N/A",
+        f"{rsi_14:.1f}" if rsi_14 is not None else "N/A",
+        f"{vwap_slope:.4f}" if vwap_slope is not None else "N/A",
     )
 
     return MarketContext(
@@ -117,6 +124,8 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
         below_orb=below_orb,
         spy_1d_change_pct=spy_1d_change_pct,
         vwap=vwap,
+        rsi_14=rsi_14,
+        vwap_slope=vwap_slope,
     )
 
 
@@ -202,6 +211,44 @@ def _compute_1d_change(bars: pd.DataFrame, symbol: str) -> float:
     except Exception:
         pass
     return 0.0
+
+
+def _compute_rsi(closes: pd.Series, period: int = 14) -> float | None:
+    """Compute RSI-14 on a close price series using Wilder's EWM smoothing."""
+    if closes is None or len(closes) < period + 1:
+        return None
+    try:
+        delta = closes.diff().dropna()
+        gains = delta.clip(lower=0)
+        losses = (-delta).clip(lower=0)
+        avg_gain = gains.ewm(alpha=1 / period, min_periods=period, adjust=False).mean().iloc[-1]
+        avg_loss = losses.ewm(alpha=1 / period, min_periods=period, adjust=False).mean().iloc[-1]
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(100.0 - (100.0 / (1 + rs)), 2)
+    except Exception:
+        return None
+
+
+def _compute_vwap_slope(bars_today: pd.DataFrame, n_bars: int = 6) -> float | None:
+    """VWAP slope as fractional change over the last n_bars (default 6 × 5min = 30 min)."""
+    if bars_today.empty or len(bars_today) < n_bars + 1:
+        return None
+    try:
+        typical = (bars_today["High"] + bars_today["Low"] + bars_today["Close"]) / 3
+        cum_tpv = (typical * bars_today["Volume"]).cumsum()
+        cum_vol = bars_today["Volume"].cumsum()
+        rolling_vwap = (cum_tpv / cum_vol).replace(0, float("nan")).dropna()
+        if len(rolling_vwap) < n_bars + 1:
+            return None
+        past_vwap = float(rolling_vwap.iloc[-n_bars])
+        current_vwap = float(rolling_vwap.iloc[-1])
+        if past_vwap <= 0:
+            return None
+        return (current_vwap - past_vwap) / past_vwap
+    except Exception:
+        return None
 
 
 def select_symbol_for_today(universe: list[str]) -> str:
