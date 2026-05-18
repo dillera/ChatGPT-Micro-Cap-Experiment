@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
-"""Obtain a TastyTrade refresh token via the OAuth2 Authorization Code flow.
+"""Obtain a TastyTrade refresh token via OAuth2 Authorization Code + PKCE flow.
 
 Usage:
     uv run python scripts/get_refresh_token.py
 
 What it does:
-  1. Opens your browser to TastyTrade's OAuth authorization page
-  2. You log in there (TT handles username, password, 2FA — not this script)
-  3. TT redirects back to http://localhost:<PORT>/callback with ?code=...
-  4. This script exchanges that code for a refresh token
+  1. Opens your browser to https://my.tastytrade.com/auth.html
+  2. You log in there (TT handles username, password, and 2FA)
+  3. TT redirects to http://localhost:18085/callback?code=...
+  4. Exchanges the code for a refresh token via /oauth/token
   5. Writes TT_REFRESH=<token> to your .env file
 
-Requires TT_SECRET in .env (your OAuth client secret from TT developer portal).
+Requires TT_SECRET in .env (OAuth client secret from TT developer portal).
+Discovery doc: https://api.tastytrade.com/.well-known/openid-configuration
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import http.server
 import os
+import secrets
 import sys
 import threading
+import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
@@ -28,13 +33,27 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-API_URL = "https://api.tastyworks.com"
+# From OpenID discovery: https://api.tastytrade.com/.well-known/openid-configuration
+AUTH_ENDPOINT = "https://my.tastytrade.com/auth.html"
+TOKEN_ENDPOINT = "https://api.tastytrade.com/oauth/token"
 CALLBACK_PORT = 18085
 REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
 
 
 # ---------------------------------------------------------------------------
-# Local callback server — captures the ?code= from TT's redirect
+# PKCE helpers
+# ---------------------------------------------------------------------------
+
+def _pkce_pair() -> tuple[str, str]:
+    """Return (code_verifier, code_challenge) using S256 method."""
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    digest = hashlib.sha256(verifier.encode()).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return verifier, challenge
+
+
+# ---------------------------------------------------------------------------
+# Local callback server
 # ---------------------------------------------------------------------------
 
 _auth_code: str | None = None
@@ -52,9 +71,9 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
             body = b"<h2>Authorization failed. Check the terminal.</h2>"
         elif "code" in params:
             _auth_code = params["code"][0]
-            body = b"<h2>Authorization successful! You can close this tab.</h2>"
+            body = b"<h2>Authorized! You can close this tab.</h2>"
         else:
-            body = b"<h2>Unexpected callback. Check the terminal.</h2>"
+            body = b"<h2>Unexpected callback — check the terminal.</h2>"
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
@@ -62,23 +81,20 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, *args):
-        pass  # suppress request logs
+        pass
 
 
-def _start_callback_server() -> http.server.HTTPServer:
+def _start_callback_server() -> None:
     server = http.server.HTTPServer(("localhost", CALLBACK_PORT), _CallbackHandler)
     thread = threading.Thread(target=server.handle_request, daemon=True)
     thread.start()
-    return server
 
 
 # ---------------------------------------------------------------------------
-# Main flow
+# .env helpers
 # ---------------------------------------------------------------------------
 
-
-def _load_env_value(key: str) -> str | None:
-    """Read a key from .env without loading the whole file into os.environ."""
+def _read_env_value(key: str) -> str | None:
     env_file = ROOT / ".env"
     if not env_file.exists():
         return None
@@ -90,10 +106,8 @@ def _load_env_value(key: str) -> str | None:
 
 
 def _write_env_value(key: str, value: str) -> None:
-    """Update or append key=value in .env."""
     env_file = ROOT / ".env"
     lines = env_file.read_text().splitlines() if env_file.exists() else []
-
     updated = False
     new_lines = []
     for line in lines:
@@ -102,67 +116,75 @@ def _write_env_value(key: str, value: str) -> None:
             updated = True
         else:
             new_lines.append(line)
-
     if not updated:
         new_lines.append(f"{key}={value}")
-
     env_file.write_text("\n".join(new_lines) + "\n")
     print(f"  Written {key} to .env")
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main():
-    # --- 1. Get client secret ---
-    client_secret = _load_env_value("TT_SECRET") or os.getenv("TT_SECRET")
+    # 1. Get client secret
+    client_secret = _read_env_value("TT_SECRET") or os.getenv("TT_SECRET")
     if not client_secret:
         client_secret = input("Enter your TastyTrade OAuth client secret (TT_SECRET): ").strip()
     if not client_secret:
-        print("Error: TT_SECRET is required.")
+        print("Error: TT_SECRET is required (set it in .env or enter it above).")
         sys.exit(1)
 
-    # --- 2. Build authorization URL ---
+    # 2. Generate PKCE pair and state
+    code_verifier, code_challenge = _pkce_pair()
+    state = secrets.token_urlsafe(16)
+
+    # 3. Build authorization URL
     auth_params = urllib.parse.urlencode({
         "response_type": "code",
-        "client_id": client_secret,  # TT uses client_secret as client_id
+        "client_id": client_secret,
         "redirect_uri": REDIRECT_URI,
+        "scope": "read trade offline_access",
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     })
-    auth_url = f"{API_URL}/oauth/authorize?{auth_params}"
+    auth_url = f"{AUTH_ENDPOINT}?{auth_params}"
 
-    # --- 3. Start callback server, open browser ---
-    print(f"\nStarting local callback server on port {CALLBACK_PORT}...")
+    # 4. Start callback server and open browser
     _start_callback_server()
-
-    print(f"\nOpening browser for TastyTrade login...")
-    print(f"  URL: {auth_url}\n")
+    print(f"\nOpening TastyTrade login in your browser...")
+    print(f"  {auth_url}\n")
     webbrowser.open(auth_url)
-    print("Waiting for authorization callback... (log in to TastyTrade in the browser)")
+    print("Waiting for you to log in... (2-minute timeout)")
 
-    # Wait for the callback handler to set _auth_code (it runs in daemon thread)
-    import time
-    for _ in range(120):  # 2-minute timeout
+    # 5. Wait for callback
+    for _ in range(240):  # 2-minute timeout at 0.5s intervals
         if _auth_code or _server_error:
             break
         time.sleep(0.5)
 
     if _server_error:
-        print(f"\nAuthorization error from TastyTrade: {_server_error}")
+        print(f"\nAuthorization error: {_server_error}")
         sys.exit(1)
 
     if not _auth_code:
-        print("\nTimed out waiting for authorization. Did the browser open?")
-        print(f"Try opening this URL manually: {auth_url}")
+        print("\nTimed out waiting for callback. Did the browser open?")
+        print(f"Try opening manually: {auth_url}")
         sys.exit(1)
 
-    print(f"\nGot authorization code: {_auth_code[:12]}...")
+    print(f"Got authorization code.")
 
-    # --- 4. Exchange code for tokens ---
-    print("Exchanging authorization code for refresh token...")
+    # 6. Exchange code for tokens
+    print("Exchanging code for refresh token...")
     resp = httpx.post(
-        f"{API_URL}/oauth/token",
+        TOKEN_ENDPOINT,
         json={
             "grant_type": "authorization_code",
             "client_secret": client_secret,
             "code": _auth_code,
             "redirect_uri": REDIRECT_URI,
+            "code_verifier": code_verifier,
         },
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
@@ -174,25 +196,18 @@ def main():
 
     data = resp.json()
     refresh_token = data.get("refresh_token") or data.get("refresh-token")
-    access_token = data.get("access_token") or data.get("access-token")
 
     if not refresh_token:
-        print("\nNo refresh_token in response:")
+        print("\nNo refresh_token in response. Full response:")
         print(data)
-        # Fall back to access token as a session token (some providers omit refresh)
-        if access_token:
-            print("\nOnly access_token found — using it as TT_REFRESH (shorter-lived).")
-            refresh_token = access_token
-        else:
-            sys.exit(1)
+        sys.exit(1)
 
-    # --- 5. Write to .env ---
-    print(f"\nSuccess! Refresh token received.")
+    # 7. Write to .env
     _write_env_value("TT_REFRESH", refresh_token)
 
     print(f"\n{'='*60}")
-    print("Done! Your .env has been updated with TT_REFRESH.")
-    print("Refresh tokens don't expire — keep .env safe and out of git.")
+    print("Done! TT_REFRESH written to .env.")
+    print("Refresh tokens don't expire — keep .env out of git.")
     print(f"{'='*60}\n")
 
 
