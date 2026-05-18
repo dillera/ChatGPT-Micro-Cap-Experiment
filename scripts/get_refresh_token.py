@@ -73,7 +73,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
             _auth_code = params["code"][0]
             body = b"<h2>Authorized! You can close this tab.</h2>"
         else:
-            body = b"<h2>Unexpected callback — check the terminal.</h2>"
+            body = b"<h2>Unexpected callback - check the terminal.</h2>"
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
@@ -127,12 +127,15 @@ def _write_env_value(key: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main():
-    # 1. Get client secret
+    # 1. Get client ID and secret
+    client_id = _read_env_value("TT_CLIENT_ID") or os.getenv("TT_CLIENT_ID")
     client_secret = _read_env_value("TT_SECRET") or os.getenv("TT_SECRET")
+    if not client_id:
+        client_id = input("Enter your TastyTrade OAuth client ID (TT_CLIENT_ID): ").strip()
     if not client_secret:
         client_secret = input("Enter your TastyTrade OAuth client secret (TT_SECRET): ").strip()
-    if not client_secret:
-        print("Error: TT_SECRET is required (set it in .env or enter it above).")
+    if not client_id or not client_secret:
+        print("Error: TT_CLIENT_ID and TT_SECRET are both required.")
         sys.exit(1)
 
     # 2. Generate PKCE pair and state
@@ -142,7 +145,7 @@ def main():
     # 3. Build authorization URL
     auth_params = urllib.parse.urlencode({
         "response_type": "code",
-        "client_id": client_secret,
+        "client_id": client_id,
         "redirect_uri": REDIRECT_URI,
         "scope": "read trade offline_access",
         "state": state,
@@ -181,6 +184,7 @@ def main():
         TOKEN_ENDPOINT,
         json={
             "grant_type": "authorization_code",
+            "client_id": client_id,
             "client_secret": client_secret,
             "code": _auth_code,
             "redirect_uri": REDIRECT_URI,
