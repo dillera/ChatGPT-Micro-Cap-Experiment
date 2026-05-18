@@ -594,6 +594,61 @@ class TastytradeClient:
             "dry_run": dry_run,
         }
 
+    def place_credit_spread(
+        self,
+        short_occ: str,
+        long_occ: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a two-leg credit vertical spread as a single order.
+
+        short_occ = the OTM leg we sell (SELL_TO_OPEN).
+        long_occ  = the further OTM protection leg (BUY_TO_OPEN).
+        Price = +net_credit (positive = credit received).
+        """
+        return self._run(
+            self._async_place_credit_spread(short_occ, long_occ, contracts, net_credit, dry_run)
+        )
+
+    async def _async_place_credit_spread(
+        self,
+        short_occ: str,
+        long_occ: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        short_opt = await Option.get(self._session, short_occ)
+        long_opt = await Option.get(self._session, long_occ)
+
+        if getattr(short_opt, "is_closing_only", False):
+            raise ValueError(f"{short_occ} is closing-only — cannot open short leg")
+
+        qty = Decimal(str(contracts))
+        short_leg = short_opt.build_leg(qty, OrderAction.SELL_TO_OPEN)
+        long_leg = long_opt.build_leg(qty, OrderAction.BUY_TO_OPEN)
+
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[short_leg, long_leg],
+            price=net_credit,  # positive = credit received
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "short_occ": short_occ,
+            "long_occ": long_occ,
+            "contracts": contracts,
+            "net_credit": float(net_credit),
+            "dry_run": dry_run,
+        }
+
     def sync_positions_to_db(self, snapshot: AccountSnapshot) -> int:
         """Write live positions to SQLite, replacing existing rows. Returns count synced."""
         conn = get_db()

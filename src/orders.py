@@ -394,6 +394,236 @@ def execute_spread_trade(
     }
 
 
+def execute_credit_spread_trade(
+    client: "TastytradeClient",
+    rec: "SpreadRecommendation",
+    signal: "StrategySignal",
+    chain: dict,
+    buying_power: float,
+    dry_run: bool = True,
+) -> dict:
+    """Execute a vertical credit spread trade (bull put or bear call).
+
+    Safety gates (in order):
+    1. Daily target gate
+    2. Strike selection — short OTM leg + long protection leg
+    3. Quote both legs via DXLink
+    4. Credit validation — net_credit must be > 0
+    5. Contract sizing — bounded by max loss per trade
+    6. Re-quote immediately before submission
+    7. Dry-run preflight → real submission
+    8. Record to spread_positions table
+    9. Increment daily trade count
+    """
+    from src.daily_target import get_today_target, increment_trade_count, should_take_trade
+    from src.options_strategy import select_credit_spread, compute_credit_spread_contracts
+
+    settings = get_settings()
+
+    # Gate 1: daily target
+    state = get_today_target()
+    allowed, reason = should_take_trade(state, signal.strategy)
+    if not allowed:
+        logger.info("Credit spread blocked: {}", reason)
+        return {"status": "skipped", "reason": reason}
+
+    direction = signal.direction
+    underlying_price = chain.get("underlying_price", 0.0)
+
+    # Gate 2: pick strikes
+    legs_key = "puts" if direction == "PUT" else "calls"
+    legs = chain.get(legs_key, [])
+    if len(legs) < 2:
+        return {"status": "rejected", "reason": f"insufficient {direction} legs in chain"}
+
+    # Find short leg (OTM) and long leg (protection)
+    if direction == "PUT":
+        target_short_strike = underlying_price * (1 - settings.options_credit_otm_pct)
+        target_long_strike_fn = lambda s: s - settings.options_spread_width
+    else:
+        target_short_strike = underlying_price * (1 + settings.options_credit_otm_pct)
+        target_long_strike_fn = lambda s: s + settings.options_spread_width
+
+    short_leg = sorted(legs, key=lambda s: abs(s["strike"] - target_short_strike))[0]
+    long_leg = sorted(
+        legs, key=lambda s: abs(s["strike"] - target_long_strike_fn(short_leg["strike"]))
+    )[0]
+
+    if short_leg["occ_symbol"] == long_leg["occ_symbol"]:
+        return {"status": "rejected", "reason": "short and long strikes are the same"}
+
+    # Gate 3: get live quotes
+    try:
+        short_q, long_q = client.get_spread_quotes(
+            short_leg["streamer_symbol"], long_leg["streamer_symbol"]
+        )
+    except Exception as e:
+        logger.warning("Credit spread quote failed: {}", e)
+        return {"status": "rejected", "reason": f"quote failed: {e}"}
+
+    short_bid, short_ask = short_q
+    long_bid, long_ask = long_q
+
+    if short_bid <= 0:
+        return {"status": "rejected", "reason": "invalid short leg price"}
+
+    # Gate 4: credit validation — natural credit = short_bid - long_ask (worst case fill)
+    net_credit_natural = short_bid - long_ask
+    actual_width = abs(short_leg["strike"] - long_leg["strike"])
+
+    if actual_width <= 0 or net_credit_natural <= 0:
+        logger.warning(
+            "Credit spread rejected: natural credit ${:.2f} for width ${:.1f}",
+            net_credit_natural, actual_width,
+        )
+        return {"status": "rejected", "reason": f"non-positive credit ${net_credit_natural:.2f}"}
+
+    # Gate 5: sizing — submit at mid for better fills
+    short_mid = (short_bid + short_ask) / 2
+    long_mid = (long_bid + long_ask) / 2
+    net_credit_mid = short_mid - long_mid
+    net_credit_submit = max(round((net_credit_natural + net_credit_mid) / 2, 2), net_credit_mid)
+
+    max_loss_per_trade = min(
+        settings.options_daily_stop_loss,
+        (actual_width - net_credit_submit) * 100 * settings.options_max_contracts,
+    )
+    contracts = compute_credit_spread_contracts(
+        max_loss_per_trade, actual_width, net_credit_submit, settings.options_max_contracts
+    )
+    if contracts == 0:
+        return {"status": "rejected", "reason": "zero contracts computed"}
+
+    limit_credit = Decimal(str(round(net_credit_submit, 2)))
+    max_profit_per_contract = float(limit_credit) * 100
+    max_loss_per_contract = (actual_width - float(limit_credit)) * 100
+    max_loss_dollars = max_loss_per_contract * contracts
+
+    logger.info(
+        "Credit spread pre-flight: {} {} | short {} @ ${:.2f} / long {} @ ${:.2f} | "
+        "credit=${:.2f} | {} contract(s) | max_loss=${:.2f}",
+        direction, rec.symbol,
+        short_leg["occ_symbol"], short_leg["strike"],
+        long_leg["occ_symbol"], long_leg["strike"],
+        float(limit_credit), contracts, max_loss_dollars,
+    )
+
+    # Gate 6: re-quote before submission
+    try:
+        short_q2, long_q2 = client.get_spread_quotes(
+            short_leg["streamer_symbol"], long_leg["streamer_symbol"]
+        )
+        net_credit_recheck = short_q2[0] - long_q2[1]  # short_bid - long_ask (natural)
+        if net_credit_recheck <= 0:
+            return {
+                "status": "rejected",
+                "reason": f"re-quote: credit turned negative (${net_credit_recheck:.2f})",
+            }
+    except Exception as e:
+        logger.warning("Re-quote failed, proceeding with original: {}", e)
+
+    # Gate 7: dry-run preflight
+    try:
+        client.place_credit_spread(
+            short_leg["occ_symbol"], long_leg["occ_symbol"],
+            contracts, limit_credit, dry_run=True,
+        )
+    except ValueError as e:
+        return {"status": "rejected", "reason": str(e)}
+
+    if dry_run:
+        logger.info("Credit spread dry-run complete: {} {} x{}", direction, rec.symbol, contracts)
+        return {
+            "status": "dry_run",
+            "symbol": rec.symbol,
+            "direction": direction,
+            "spread_type": "CALL_CREDIT" if direction == "CALL" else "PUT_CREDIT",
+            "short_occ": short_leg["occ_symbol"],
+            "long_occ": long_leg["occ_symbol"],
+            "short_strike": short_leg["strike"],
+            "long_strike": long_leg["strike"],
+            "contracts": contracts,
+            "net_credit": float(limit_credit),
+            "max_profit": max_profit_per_contract * contracts,
+            "max_loss": max_loss_dollars,
+            "expiry": chain.get("expiry"),
+            "dte": chain.get("dte"),
+        }
+
+    # Gate 8: real submission
+    result = client.place_credit_spread(
+        short_leg["occ_symbol"], long_leg["occ_symbol"],
+        contracts, limit_credit, dry_run=False,
+    )
+
+    order_id = None
+    order_response = result.get("order_response")
+    if order_response and hasattr(order_response, "order"):
+        order_obj = order_response.order
+        if hasattr(order_obj, "id"):
+            order_id = str(order_obj.id)
+
+    spread_type = "CALL_CREDIT" if direction == "CALL" else "PUT_CREDIT"
+
+    # Gate 9: record to spread_positions
+    conn = get_db()
+    try:
+        conn.execute(
+            """INSERT INTO spread_positions
+               (symbol, spread_type, long_strike, short_strike, expiry, dte_at_open,
+                contracts, debit_paid, max_profit, max_loss, target_exit_pct,
+                opened_at, status, order_id, long_occ, short_occ, daily_session)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)""",
+            (
+                rec.symbol,
+                spread_type,
+                long_leg["strike"],
+                short_leg["strike"],
+                chain.get("expiry", ""),
+                chain.get("dte", 0),
+                contracts,
+                -float(limit_credit),         # negative = credit received (store as negative debit)
+                max_profit_per_contract * contracts,
+                max_loss_dollars,
+                settings.options_profit_close_pct,
+                datetime.now(ET).isoformat(),
+                order_id,
+                long_leg["occ_symbol"],
+                short_leg["occ_symbol"],
+                signal.strategy.lower(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Gate 10: increment daily trade count
+    increment_trade_count()
+
+    logger.info(
+        "Credit spread executed: {} {} x{} contracts | order_id={}",
+        spread_type, rec.symbol, contracts, order_id,
+    )
+
+    return {
+        "status": "executed",
+        "symbol": rec.symbol,
+        "direction": direction,
+        "spread_type": spread_type,
+        "short_occ": short_leg["occ_symbol"],
+        "long_occ": long_leg["occ_symbol"],
+        "short_strike": short_leg["strike"],
+        "long_strike": long_leg["strike"],
+        "contracts": contracts,
+        "net_credit": float(limit_credit),
+        "max_profit": max_profit_per_contract * contracts,
+        "max_loss": max_loss_dollars,
+        "expiry": chain.get("expiry"),
+        "dte": chain.get("dte"),
+        "order_id": order_id,
+    }
+
+
 def close_spread_position(
     client: "TastytradeClient",
     spread: "SpreadPosition",

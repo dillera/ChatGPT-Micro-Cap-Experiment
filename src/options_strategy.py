@@ -1,9 +1,10 @@
 """Options strategy signal generation and spread selection.
 
-Three time-windowed strategies:
+Four time-windowed strategies:
   1. ORB (Opening Range Breakout) — 9:45-10:15 ET — primary
   2. Mean Reversion — 11:00-14:00 ET — fallback
   3. Pre-Close — 15:00-15:45 ET — last resort
+  4. Credit Spread — any window — fires when no debit signal fires
 
 All time checks use America/New_York timezone.
 """
@@ -242,6 +243,126 @@ def evaluate_preclose_signal(
         suggested_dte=0,
         suggested_width=config.options_spread_width,
     )
+
+
+def evaluate_credit_spread_signal(ctx: MarketContext, config) -> StrategySignal | None:
+    """Credit spread fallback signal — fires when no debit signal triggers.
+
+    Sells an OTM spread to collect theta decay. High win rate in range-bound markets.
+
+    Bull put spread (PUT_CREDIT): BULLISH or NEUTRAL bias — sell OTM put below price.
+    Bear call spread (CALL_CREDIT): BEARISH bias — sell OTM call above price.
+
+    Skipped if VIX regime is HIGH_VOL or EXTREME (credit spreads need defined, calm vol).
+    """
+    if ctx.market_regime in ("HIGH_VOL", "EXTREME"):
+        logger.info(
+            "Credit spread: skipping — {} regime (VIX={:.1f})", ctx.market_regime, ctx.vix
+        )
+        return None
+
+    if ctx.underlying_price <= 0:
+        return None
+
+    if ctx.trend_bias == "BEARISH":
+        direction = "CALL"
+        strategy = "CREDIT_CALL"
+        reason = (
+            f"Credit call spread: {ctx.trend_bias} bias at ${ctx.underlying_price:.2f} "
+            f"(VIX={ctx.vix:.1f}) — selling OTM call {config.options_credit_otm_pct:.0%} above price"
+        )
+    else:
+        direction = "PUT"
+        strategy = "CREDIT_PUT"
+        reason = (
+            f"Credit put spread: {ctx.trend_bias} bias at ${ctx.underlying_price:.2f} "
+            f"(VIX={ctx.vix:.1f}) — selling OTM put {config.options_credit_otm_pct:.0%} below price"
+        )
+
+    logger.info("Credit spread signal: {} — {}", strategy, reason)
+    return StrategySignal(
+        strategy=strategy,
+        direction=direction,
+        symbol=ctx.symbol,
+        confidence=0.60,
+        entry_reason=reason,
+        suggested_dte=0,
+        suggested_width=config.options_spread_width,
+    )
+
+
+def select_credit_spread(
+    chain: dict,
+    direction: str,
+    underlying_price: float,
+    spread_width: float,
+    otm_pct: float,
+) -> tuple[dict, dict] | None:
+    """Select short and long legs for a vertical credit spread.
+
+    For a PUT credit spread (bull put):
+      short = put closest to underlying_price * (1 - otm_pct)  [we SELL this]
+      long  = put closest to short_strike - spread_width        [protection]
+
+    For a CALL credit spread (bear call):
+      short = call closest to underlying_price * (1 + otm_pct) [we SELL this]
+      long  = call closest to short_strike + spread_width       [protection]
+
+    Returns (short_leg_dict, long_leg_dict) or None.
+    """
+    legs = chain.get("puts" if direction == "PUT" else "calls", [])
+    if len(legs) < 2:
+        logger.warning("Insufficient {} legs for credit spread", direction)
+        return None
+
+    if direction == "PUT":
+        target_short_strike = underlying_price * (1 - otm_pct)
+        target_long_strike_fn = lambda s: s - spread_width
+    else:
+        target_short_strike = underlying_price * (1 + otm_pct)
+        target_long_strike_fn = lambda s: s + spread_width
+
+    short_candidates = sorted(legs, key=lambda s: abs(s["strike"] - target_short_strike))
+    short_leg = short_candidates[0]
+
+    target_long = target_long_strike_fn(short_leg["strike"])
+    long_candidates = sorted(legs, key=lambda s: abs(s["strike"] - target_long))
+    long_leg = long_candidates[0]
+
+    if short_leg["occ_symbol"] == long_leg["occ_symbol"]:
+        logger.warning("Credit spread: short and long leg are the same strike")
+        return None
+
+    actual_width = abs(short_leg["strike"] - long_leg["strike"])
+    if actual_width <= 0:
+        return None
+
+    logger.info(
+        "{} credit spread: short {}@${:.2f} / long {}@${:.2f} | width=${:.1f}",
+        direction,
+        short_leg["occ_symbol"], short_leg["strike"],
+        long_leg["occ_symbol"], long_leg["strike"],
+        actual_width,
+    )
+    return short_leg, long_leg
+
+
+def compute_credit_spread_contracts(
+    max_loss_per_trade: float,
+    width: float,
+    net_credit: float,
+    max_contracts: int = 5,
+) -> int:
+    """Compute contract count for a credit spread bounded by per-trade max loss.
+
+    max_loss per contract = (width - net_credit) * 100
+    contracts = floor(max_loss_per_trade / max_loss_per_contract)
+    """
+    max_loss_per_contract = (width - net_credit) * 100
+    if max_loss_per_contract <= 0:
+        return 0
+    contracts = int(max_loss_per_trade / max_loss_per_contract)
+    return max(1, min(contracts, max_contracts))
 
 
 def select_spread(

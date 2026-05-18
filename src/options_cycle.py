@@ -185,14 +185,18 @@ def run_options_cycle(window: str, dry_run: bool = True) -> dict:
         # Stage 10: fetch market context
         ctx = fetch_market_context(symbol)
 
-        # Stage 11: evaluate signal
-        from src.options_strategy import evaluate_signal_for_window
+        # Stage 11: evaluate debit signal; fall back to credit spread if none
+        from src.options_strategy import evaluate_signal_for_window, evaluate_credit_spread_signal
         signal = evaluate_signal_for_window(
             ctx, window,
             trades_today=daily_state.trades_today,
             max_trades=daily_state.max_trades,
             config=settings,
         )
+        if signal is None:
+            logger.info("No debit signal for {} window — trying credit spread fallback", window)
+            signal = evaluate_credit_spread_signal(ctx, settings)
+
         result["signal"] = signal.__dict__ if signal else None
 
         if signal is None:
@@ -230,17 +234,29 @@ def run_options_cycle(window: str, dry_run: bool = True) -> dict:
             write_run_log(result)
             return result
 
-        # Stage 13: execute spread
-        from src.orders import execute_spread_trade
+        # Stage 13: execute spread — route to credit or debit executor by strategy type
         rec = consensus.approved_trades[0]
-        trade_result = execute_spread_trade(
-            client=client,
-            rec=rec,
-            signal=signal,
-            chain=chain,
-            buying_power=buying_power,
-            dry_run=dry_run,
-        )
+        is_credit = signal.strategy.startswith("CREDIT_")
+        if is_credit:
+            from src.orders import execute_credit_spread_trade
+            trade_result = execute_credit_spread_trade(
+                client=client,
+                rec=rec,
+                signal=signal,
+                chain=chain,
+                buying_power=buying_power,
+                dry_run=dry_run,
+            )
+        else:
+            from src.orders import execute_spread_trade
+            trade_result = execute_spread_trade(
+                client=client,
+                rec=rec,
+                signal=signal,
+                chain=chain,
+                buying_power=buying_power,
+                dry_run=dry_run,
+            )
         result["spreads_opened"] = [trade_result]
         logger.info("Spread trade result: {}", trade_result.get("status"))
 

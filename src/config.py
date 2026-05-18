@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     options_max_debit_pct: float = 0.50          # debit <= 50% of width (risk/reward gate)
     options_profit_close_pct: float = 0.50       # close at 50% of max profit
     options_universe: list[str] = ["SPY", "QQQ", "IWM"]
+    options_credit_otm_pct: float = 0.01         # short strike ~1% OTM for credit spreads
 
     # Trading windows (Eastern time as HH:MM strings)
     orb_entry_start: str = "09:45"
