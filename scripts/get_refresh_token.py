@@ -1,251 +1,199 @@
 #!/usr/bin/env python3
-"""One-time script to obtain a tastytrade refresh token.
-
-Supports two 2FA modes:
-  - TOTP (authenticator app): code is sent in the login body as one-time-password
-  - Device challenge (email/SMS): challenge-token header flow
+"""Obtain a TastyTrade refresh token via the OAuth2 Authorization Code flow.
 
 Usage:
-    python scripts/get_refresh_token.py
+    uv run python scripts/get_refresh_token.py
+
+What it does:
+  1. Opens your browser to TastyTrade's OAuth authorization page
+  2. You log in there (TT handles username, password, 2FA — not this script)
+  3. TT redirects back to http://localhost:<PORT>/callback with ?code=...
+  4. This script exchanges that code for a refresh token
+  5. Writes TT_REFRESH=<token> to your .env file
+
+Requires TT_SECRET in .env (your OAuth client secret from TT developer portal).
 """
 from __future__ import annotations
 
-import getpass
-import json
+import http.server
+import os
 import sys
+import threading
+import urllib.parse
+import webbrowser
 from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.config import get_settings
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
 API_URL = "https://api.tastyworks.com"
+CALLBACK_PORT = 18085
+REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
+
+
+# ---------------------------------------------------------------------------
+# Local callback server — captures the ?code= from TT's redirect
+# ---------------------------------------------------------------------------
+
+_auth_code: str | None = None
+_server_error: str | None = None
+
+
+class _CallbackHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        global _auth_code, _server_error
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+
+        if "error" in params:
+            _server_error = params["error"][0]
+            body = b"<h2>Authorization failed. Check the terminal.</h2>"
+        elif "code" in params:
+            _auth_code = params["code"][0]
+            body = b"<h2>Authorization successful! You can close this tab.</h2>"
+        else:
+            body = b"<h2>Unexpected callback. Check the terminal.</h2>"
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass  # suppress request logs
+
+
+def _start_callback_server() -> http.server.HTTPServer:
+    server = http.server.HTTPServer(("localhost", CALLBACK_PORT), _CallbackHandler)
+    thread = threading.Thread(target=server.handle_request, daemon=True)
+    thread.start()
+    return server
+
+
+# ---------------------------------------------------------------------------
+# Main flow
+# ---------------------------------------------------------------------------
+
+
+def _load_env_value(key: str) -> str | None:
+    """Read a key from .env without loading the whole file into os.environ."""
+    env_file = ROOT / ".env"
+    if not env_file.exists():
+        return None
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line.startswith(f"{key}="):
+            return line[len(key) + 1:].strip()
+    return None
+
+
+def _write_env_value(key: str, value: str) -> None:
+    """Update or append key=value in .env."""
+    env_file = ROOT / ".env"
+    lines = env_file.read_text().splitlines() if env_file.exists() else []
+
+    updated = False
+    new_lines = []
+    for line in lines:
+        if line.strip().startswith(f"{key}="):
+            new_lines.append(f"{key}={value}")
+            updated = True
+        else:
+            new_lines.append(line)
+
+    if not updated:
+        new_lines.append(f"{key}={value}")
+
+    env_file.write_text("\n".join(new_lines) + "\n")
+    print(f"  Written {key} to .env")
 
 
 def main():
-    settings = get_settings()
-
-    client_secret = settings.tt_secret
+    # --- 1. Get client secret ---
+    client_secret = _load_env_value("TT_SECRET") or os.getenv("TT_SECRET")
     if not client_secret:
-        client_secret = input("Enter your tastytrade Client Secret (TT_SECRET): ").strip()
+        client_secret = input("Enter your TastyTrade OAuth client secret (TT_SECRET): ").strip()
     if not client_secret:
-        print("Error: Client secret is required")
+        print("Error: TT_SECRET is required.")
         sys.exit(1)
 
-    print("\nEnter your tastytrade account credentials:")
-    username = input("Username (email): ").strip()
-    password = getpass.getpass("Password: ")
+    # --- 2. Build authorization URL ---
+    auth_params = urllib.parse.urlencode({
+        "response_type": "code",
+        "client_id": client_secret,  # TT uses client_secret as client_id
+        "redirect_uri": REDIRECT_URI,
+    })
+    auth_url = f"{API_URL}/oauth/authorize?{auth_params}"
 
-    if not username or not password:
-        print("Error: Username and password are required")
+    # --- 3. Start callback server, open browser ---
+    print(f"\nStarting local callback server on port {CALLBACK_PORT}...")
+    _start_callback_server()
+
+    print(f"\nOpening browser for TastyTrade login...")
+    print(f"  URL: {auth_url}\n")
+    webbrowser.open(auth_url)
+    print("Waiting for authorization callback... (log in to TastyTrade in the browser)")
+
+    # Wait for the callback handler to set _auth_code (it runs in daemon thread)
+    import time
+    for _ in range(120):  # 2-minute timeout
+        if _auth_code or _server_error:
+            break
+        time.sleep(0.5)
+
+    if _server_error:
+        print(f"\nAuthorization error from TastyTrade: {_server_error}")
         sys.exit(1)
 
-    client = httpx.Client(
-        base_url=API_URL,
+    if not _auth_code:
+        print("\nTimed out waiting for authorization. Did the browser open?")
+        print(f"Try opening this URL manually: {auth_url}")
+        sys.exit(1)
+
+    print(f"\nGot authorization code: {_auth_code[:12]}...")
+
+    # --- 4. Exchange code for tokens ---
+    print("Exchanging authorization code for refresh token...")
+    resp = httpx.post(
+        f"{API_URL}/oauth/token",
+        json={
+            "grant_type": "authorization_code",
+            "client_secret": client_secret,
+            "code": _auth_code,
+            "redirect_uri": REDIRECT_URI,
+        },
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
 
-    # Step 1: attempt login without 2FA code
-    print("\nLogging in to tastytrade...")
-    r = client.post("/sessions", json={"login": username, "password": password, "remember-me": True})
-
-    if r.status_code in (200, 201):
-        _handle_success(client, client_secret, r.json())
-        return
-
-    body = r.json()
-    error_code = body.get("error", {}).get("code", "")
-
-    # TOTP flow: server tells us a 2FA code is required
-    if r.status_code in (401, 422, 403) and (
-        "mfa" in error_code.lower()
-        or "two_factor" in error_code.lower()
-        or "two factor" in body.get("error", {}).get("message", "").lower()
-        or "one-time" in body.get("error", {}).get("message", "").lower()
-    ):
-        print("Two-factor authentication required.")
-        _handle_totp(client, username, password, client_secret)
-        return
-
-    # Device challenge flow (new device verification via email/SMS)
-    if r.status_code == 403 and error_code == "device_challenge_required":
-        print("Device verification required (new device — check email/SMS).")
-        _handle_device_challenge(client, username, password, client_secret, r)
-        return
-
-    # Unknown failure — show full response to help debug
-    print(f"\nLogin failed ({r.status_code}): {r.text}")
-    print("\nIf you have an authenticator app, run again and enter your TOTP code when prompted.")
-    sys.exit(1)
-
-
-def _handle_totp(client: httpx.Client, username: str, password: str, client_secret: str):
-    """TOTP flow: include one-time-password directly in the login request body."""
-    code = input("Enter your authenticator app code: ").strip()
-    if not code:
-        print("Error: Code is required")
+    if resp.status_code not in (200, 201):
+        print(f"\nToken exchange failed ({resp.status_code}):")
+        print(resp.text)
         sys.exit(1)
 
-    print("Verifying TOTP code...")
-    r = client.post(
-        "/sessions",
-        json={
-            "login": username,
-            "password": password,
-            "one-time-password": code,
-            "remember-me": True,
-        },
-    )
+    data = resp.json()
+    refresh_token = data.get("refresh_token") or data.get("refresh-token")
+    access_token = data.get("access_token") or data.get("access-token")
 
-    if r.status_code in (200, 201):
-        _handle_success(client, client_secret, r.json())
-        return
+    if not refresh_token:
+        print("\nNo refresh_token in response:")
+        print(data)
+        # Fall back to access token as a session token (some providers omit refresh)
+        if access_token:
+            print("\nOnly access_token found — using it as TT_REFRESH (shorter-lived).")
+            refresh_token = access_token
+        else:
+            sys.exit(1)
 
-    print(f"TOTP login failed ({r.status_code}): {r.text}")
-    sys.exit(1)
+    # --- 5. Write to .env ---
+    print(f"\nSuccess! Refresh token received.")
+    _write_env_value("TT_REFRESH", refresh_token)
 
-
-def _handle_device_challenge(
-    client: httpx.Client,
-    username: str,
-    password: str,
-    client_secret: str,
-    initial_response: httpx.Response,
-):
-    """Handle 2FA challenge. Tries TOTP (authenticator app) first, then email/SMS fallback."""
-    challenge_token = (
-        initial_response.headers.get("x-tastyworks-challenge-token")
-        or initial_response.json().get("error", {}).get("redirect", {}).get("challenge_token")
-        or initial_response.json().get("challenge_token")
-    )
-
-    if not challenge_token:
-        print("Could not find challenge token in response:")
-        print(json.dumps(initial_response.json(), indent=2))
-        sys.exit(1)
-
-    print(f"Got challenge token: {challenge_token[:20]}...")
-
-    # Try TOTP first — submit authenticator code directly without triggering email/SMS
-    code = input("Enter your authenticator app code (or press Enter to receive email/SMS code): ").strip()
-
-    if code:
-        # Attempt TOTP: include challenge token + one-time-password in login body
-        r = client.post(
-            "/sessions",
-            json={
-                "login": username,
-                "password": password,
-                "one-time-password": code,
-                "remember-me": True,
-            },
-            headers={"X-Tastyworks-Challenge-Token": challenge_token},
-        )
-        if r.status_code in (200, 201):
-            _handle_success(client, client_secret, r.json())
-            return
-
-        # Some tastytrade setups want the code as a header instead
-        r = client.post(
-            "/sessions",
-            json={"login": username, "password": password, "remember-me": True},
-            headers={
-                "X-Tastyworks-Challenge-Token": challenge_token,
-                "X-Tastyworks-OTC": code,
-            },
-        )
-        if r.status_code in (200, 201):
-            _handle_success(client, client_secret, r.json())
-            return
-
-        print(f"TOTP attempt 1 failed ({r.status_code}): {r.text}")
-        print(f"TOTP attempt 2 failed ({r.status_code}): {r.text}")
-        print("\nDebug — full response headers:")
-        print(dict(r.headers))
-        print("Falling back to email/SMS challenge...")
-
-    # Email/SMS fallback: trigger tastytrade to send a code
-    r2 = client.post(
-        "/device-challenge",
-        headers={"X-Tastyworks-Challenge-Token": challenge_token},
-    )
-    if r2.status_code not in (200, 201, 202):
-        print(f"Failed to send email/SMS code ({r2.status_code}): {r2.text}")
-        sys.exit(1)
-
-    sms_code = input("Enter the code sent to your email/phone: ").strip()
-    if not sms_code:
-        print("Error: Code is required")
-        sys.exit(1)
-
-    r3 = client.post(
-        "/sessions",
-        json={"login": username, "password": password, "remember-me": True},
-        headers={
-            "X-Tastyworks-Challenge-Token": challenge_token,
-            "X-Tastyworks-OTC": sms_code,
-        },
-    )
-    if r3.status_code not in (200, 201):
-        print(f"Login with email/SMS code failed ({r3.status_code}): {r3.text}")
-        sys.exit(1)
-
-    _handle_success(client, client_secret, r3.json())
-
-
-def _handle_success(client: httpx.Client, client_secret: str, response_body: dict):
-    """Extract session token and obtain a refresh token."""
-    data = response_body.get("data", response_body)
-
-    # Tastytrade sometimes includes the refresh token directly in the login response
-    refresh_token = (
-        data.get("refresh-token")
-        or data.get("refresh_token")
-    )
-    if refresh_token:
-        _print_result(client_secret, refresh_token)
-        return
-
-    session_token = (
-        data.get("session-token")
-        or data.get("session_token")
-        or data.get("token")
-    )
-    if not session_token:
-        print("Login succeeded but could not find session token:")
-        print(json.dumps(response_body, indent=2))
-        sys.exit(1)
-
-    print("Login successful — exchanging session for refresh token...")
-
-    r = client.post(
-        "/oauth/token",
-        json={
-            "grant_type": "refresh_token",
-            "client_secret": client_secret,
-            "refresh_token": session_token,
-        },
-    )
-    if r.status_code in (200, 201):
-        token_data = r.json()
-        refresh_token = token_data.get("refresh_token") or token_data.get("refresh-token")
-        if refresh_token:
-            _print_result(client_secret, refresh_token)
-            return
-
-    # Session token may itself be usable as a refresh token
-    _print_result(client_secret, session_token)
-
-
-def _print_result(client_secret: str, refresh_token: str):
     print(f"\n{'='*60}")
-    print("SUCCESS! Add these to your .env file:")
+    print("Done! Your .env has been updated with TT_REFRESH.")
+    print("Refresh tokens don't expire — keep .env safe and out of git.")
     print(f"{'='*60}\n")
-    print(f"TT_SECRET={client_secret}")
-    print(f"TT_REFRESH={refresh_token}")
-    print(f"\n{'='*60}")
-    print("Refresh tokens typically don't expire. Keep it safe!")
 
 
 if __name__ == "__main__":
