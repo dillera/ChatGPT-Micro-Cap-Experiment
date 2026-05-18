@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     options_profit_close_pct: float = 0.50       # close at 50% of max profit
     options_universe: list[str] = ["SPY", "QQQ", "IWM"]
     options_credit_otm_pct: float = 0.01         # short strike ~1% OTM for credit spreads
+    options_condor_otm_pct: float = 0.015        # short strikes ~1.5% OTM for iron condors (wider zone)
+
+    # VIX-based position sizing multipliers
+    vix_size_low_vol: float = 1.5    # LOW_VOL  (<15)  — cheap premium, high win rate → size up
+    vix_size_normal: float = 1.0     # NORMAL (15-25)  — baseline
+    vix_size_high_vol: float = 0.5   # HIGH_VOL (25-35) — expensive but risky → size down
 
     # Dynamic profit targets — time-of-day based close thresholds
     # Debit spreads: theta works against you — close aggressively early

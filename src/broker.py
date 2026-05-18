@@ -594,6 +594,69 @@ class TastytradeClient:
             "dry_run": dry_run,
         }
 
+    def place_iron_condor(
+        self,
+        short_put: str,
+        long_put: str,
+        short_call: str,
+        long_call: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool = True,
+    ) -> dict:
+        """Place a 4-leg iron condor as a single order.
+
+        Legs: SELL short_put, BUY long_put, SELL short_call, BUY long_call.
+        Price = +net_credit (total credit from both sides, positive).
+        """
+        return self._run(
+            self._async_place_iron_condor(
+                short_put, long_put, short_call, long_call, contracts, net_credit, dry_run
+            )
+        )
+
+    async def _async_place_iron_condor(
+        self,
+        short_put: str,
+        long_put: str,
+        short_call: str,
+        long_call: str,
+        contracts: int,
+        net_credit: Decimal,
+        dry_run: bool,
+    ) -> dict:
+        from tastytrade.instruments import Option
+        from tastytrade.order import NewOrder, OrderAction, OrderType, OrderTimeInForce
+
+        sp_opt = await Option.get(self._session, short_put)
+        lp_opt = await Option.get(self._session, long_put)
+        sc_opt = await Option.get(self._session, short_call)
+        lc_opt = await Option.get(self._session, long_call)
+
+        for opt, occ in [(sp_opt, short_put), (sc_opt, short_call)]:
+            if getattr(opt, "is_closing_only", False):
+                raise ValueError(f"{occ} is closing-only — cannot open short leg")
+
+        qty = Decimal(str(contracts))
+        order = NewOrder(
+            time_in_force=OrderTimeInForce.DAY,
+            order_type=OrderType.LIMIT,
+            legs=[
+                sp_opt.build_leg(qty, OrderAction.SELL_TO_OPEN),
+                lp_opt.build_leg(qty, OrderAction.BUY_TO_OPEN),
+                sc_opt.build_leg(qty, OrderAction.SELL_TO_OPEN),
+                lc_opt.build_leg(qty, OrderAction.BUY_TO_OPEN),
+            ],
+            price=net_credit,
+        )
+        response = await self._account.place_order(self._session, order, dry_run=dry_run)
+        return {
+            "order_response": response,
+            "short_put": short_put, "long_put": long_put,
+            "short_call": short_call, "long_call": long_call,
+            "contracts": contracts, "net_credit": float(net_credit), "dry_run": dry_run,
+        }
+
     def place_credit_spread(
         self,
         short_occ: str,

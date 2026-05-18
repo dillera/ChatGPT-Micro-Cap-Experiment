@@ -23,13 +23,14 @@ ET = ZoneInfo("America/New_York")
 
 @dataclass
 class StrategySignal:
-    strategy: str           # "ORB", "MEAN_REVERSION", "PRE_CLOSE"
-    direction: str          # "CALL" or "PUT"
+    strategy: str           # "ORB", "MEAN_REVERSION", "PRE_CLOSE", "CREDIT_PUT", "CREDIT_CALL", "IRON_CONDOR"
+    direction: str          # "CALL", "PUT", or "NEUTRAL" (iron condor)
     symbol: str
     confidence: float       # initial mechanical confidence before LLM
     entry_reason: str
     suggested_dte: int      # 0 or 1
     suggested_width: float  # spread width in dollars
+    market_regime: str = "NORMAL"  # from MarketContext — drives VIX position sizing
 
 
 def evaluate_signal_for_window(
@@ -117,6 +118,7 @@ def evaluate_orb_signal(ctx: MarketContext, config) -> StrategySignal | None:
             entry_reason=reason,
             suggested_dte=0,
             suggested_width=config.options_spread_width,
+            market_regime=ctx.market_regime,
         )
 
     if breakout_down >= 0.0015:
@@ -138,6 +140,7 @@ def evaluate_orb_signal(ctx: MarketContext, config) -> StrategySignal | None:
             entry_reason=reason,
             suggested_dte=0,
             suggested_width=config.options_spread_width,
+            market_regime=ctx.market_regime,
         )
 
     logger.info(
@@ -192,6 +195,7 @@ def evaluate_mean_reversion_signal(
             entry_reason=reason,
             suggested_dte=0,
             suggested_width=config.options_spread_width,
+            market_regime=ctx.market_regime,
         )
 
     if deviation >= 0.005:
@@ -212,6 +216,7 @@ def evaluate_mean_reversion_signal(
             entry_reason=reason,
             suggested_dte=0,
             suggested_width=config.options_spread_width,
+            market_regime=ctx.market_regime,
         )
 
     logger.info("Mid-day: no mean reversion signal (VWAP deviation={:.3%})", deviation)
@@ -264,6 +269,7 @@ def evaluate_preclose_signal(
         entry_reason=reason,
         suggested_dte=0,
         suggested_width=config.options_spread_width,
+        market_regime=ctx.market_regime,
     )
 
 
@@ -292,7 +298,12 @@ def passes_momentum_filter(
         return True, "momentum data unavailable — filter bypassed"
 
     if is_credit:
-        if direction == "PUT":
+        if direction == "NEUTRAL":  # iron condor — block strong trending in either direction
+            if rsi is not None and (rsi < 35 or rsi > 65):
+                return False, f"iron condor blocked: RSI {rsi:.1f} outside 35–65 (market trending)"
+            if slope is not None and abs(slope) > 0.001:
+                return False, f"iron condor blocked: |VWAP slope| {abs(slope):.4f} > 0.001 (trending)"
+        elif direction == "PUT":
             if rsi is not None and rsi < 30:
                 return False, f"credit PUT blocked: RSI {rsi:.1f} < 30 (bearish momentum too strong)"
             if slope is not None and slope < -0.001:
@@ -365,6 +376,67 @@ def evaluate_credit_spread_signal(ctx: MarketContext, config) -> StrategySignal 
         entry_reason=reason,
         suggested_dte=0,
         suggested_width=config.options_spread_width,
+        market_regime=ctx.market_regime,
+    )
+
+
+def get_vix_size_multiplier(market_regime: str, config=None) -> float:
+    """Scale contract count by VIX regime.
+
+    LOW_VOL: cheap premium + high win rate → size up.
+    NORMAL:  baseline.
+    HIGH_VOL: expensive but risky → size down.
+    EXTREME: blocked upstream by circuit breaker — returns 1.0 as safety default.
+    """
+    if config is None:
+        from src.config import get_settings
+        config = get_settings()
+    if market_regime == "LOW_VOL":
+        return config.vix_size_low_vol
+    if market_regime == "HIGH_VOL":
+        return config.vix_size_high_vol
+    return config.vix_size_normal
+
+
+def evaluate_iron_condor_signal(ctx: MarketContext, config) -> StrategySignal | None:
+    """Iron condor signal — sell OTM put spread + OTM call spread simultaneously.
+
+    Requires LOW_VOL regime AND NEUTRAL trend bias. Collects theta from both
+    sides of the market. Momentum filter rejects any strong directional trend.
+    """
+    if ctx.market_regime != "LOW_VOL":
+        logger.info(
+            "Iron condor: skipping — {} regime (need LOW_VOL, VIX={:.1f})",
+            ctx.market_regime, ctx.vix,
+        )
+        return None
+
+    if ctx.trend_bias != "NEUTRAL":
+        logger.info("Iron condor: skipping — {} bias (need NEUTRAL)", ctx.trend_bias)
+        return None
+
+    if ctx.underlying_price <= 0:
+        return None
+
+    ok, mom_reason = passes_momentum_filter(ctx, "NEUTRAL", is_credit=True)
+    if not ok:
+        logger.info("Iron condor suppressed by momentum filter: {}", mom_reason)
+        return None
+
+    reason = (
+        f"Iron condor: LOW_VOL (VIX={ctx.vix:.1f}) + NEUTRAL bias at ${ctx.underlying_price:.2f} "
+        f"— selling OTM put + call spreads {config.options_condor_otm_pct:.1%} OTM"
+    )
+    logger.info("Iron condor signal — {}", reason)
+    return StrategySignal(
+        strategy="IRON_CONDOR",
+        direction="NEUTRAL",
+        symbol=ctx.symbol,
+        confidence=0.65,
+        entry_reason=reason,
+        suggested_dte=0,
+        suggested_width=config.options_spread_width,
+        market_regime=ctx.market_regime,
     )
 
 

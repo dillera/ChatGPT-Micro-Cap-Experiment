@@ -264,6 +264,9 @@ def execute_spread_trade(
     contracts = compute_spread_contracts(
         buying_power, debit_per_contract, max_loss_per_trade, settings.options_max_contracts
     )
+    from src.options_strategy import get_vix_size_multiplier
+    vix_mult = get_vix_size_multiplier(signal.market_regime)
+    contracts = max(1, min(int(contracts * vix_mult), settings.options_max_contracts))
     if contracts == 0:
         return {"status": "rejected", "reason": "zero contracts computed"}
 
@@ -491,6 +494,9 @@ def execute_credit_spread_trade(
     contracts = compute_credit_spread_contracts(
         max_loss_per_trade, actual_width, net_credit_submit, settings.options_max_contracts
     )
+    from src.options_strategy import get_vix_size_multiplier
+    vix_mult = get_vix_size_multiplier(signal.market_regime)
+    contracts = max(1, min(int(contracts * vix_mult), settings.options_max_contracts))
     if contracts == 0:
         return {"status": "rejected", "reason": "zero contracts computed"}
 
@@ -820,6 +826,154 @@ def check_and_close_open_spreads(
             )
 
     return results
+
+
+def execute_iron_condor_trade(
+    client: "TastytradeClient",
+    rec: "SpreadRecommendation",
+    signal: "StrategySignal",
+    chain: dict,
+    buying_power: float,
+    dry_run: bool = True,
+) -> dict:
+    """Execute a 4-leg iron condor: bull put spread + bear call spread.
+
+    Selects OTM short strikes on both sides, quotes all 4 legs, places a single
+    multi-leg order, stores 2 DB rows (PUT_CREDIT + CALL_CREDIT), counts as 1 trade.
+    """
+    from src.daily_target import get_today_target, increment_trade_count, should_take_trade
+    from src.options_strategy import get_vix_size_multiplier
+
+    settings = get_settings()
+
+    state = get_today_target()
+    allowed, reason = should_take_trade(state, signal.strategy)
+    if not allowed:
+        return {"status": "skipped", "reason": reason}
+
+    underlying_price = chain.get("underlying_price", 0.0)
+    puts = chain.get("puts", [])
+    calls = chain.get("calls", [])
+    if len(puts) < 2 or len(calls) < 2:
+        return {"status": "rejected", "reason": "insufficient puts or calls in chain"}
+
+    otm = settings.options_condor_otm_pct
+    width = settings.options_spread_width
+
+    short_put = sorted(puts, key=lambda s: abs(s["strike"] - underlying_price * (1 - otm)))[0]
+    long_put = sorted(puts, key=lambda s: abs(s["strike"] - (short_put["strike"] - width)))[0]
+    short_call = sorted(calls, key=lambda s: abs(s["strike"] - underlying_price * (1 + otm)))[0]
+    long_call = sorted(calls, key=lambda s: abs(s["strike"] - (short_call["strike"] + width)))[0]
+
+    if short_put["occ_symbol"] == long_put["occ_symbol"] or short_call["occ_symbol"] == long_call["occ_symbol"]:
+        return {"status": "rejected", "reason": "degenerate spread: same short and long strike"}
+
+    try:
+        put_sq, put_lq = client.get_spread_quotes(short_put["streamer_symbol"], long_put["streamer_symbol"])
+        call_sq, call_lq = client.get_spread_quotes(short_call["streamer_symbol"], long_call["streamer_symbol"])
+    except Exception as e:
+        return {"status": "rejected", "reason": f"quote failed: {e}"}
+
+    put_credit_nat = put_sq[0] - put_lq[1]
+    call_credit_nat = call_sq[0] - call_lq[1]
+    if put_credit_nat <= 0 or call_credit_nat <= 0:
+        return {"status": "rejected", "reason": f"non-positive credit: put={put_credit_nat:.2f} call={call_credit_nat:.2f}"}
+
+    put_credit_mid = (put_sq[0] + put_sq[1]) / 2 - (put_lq[0] + put_lq[1]) / 2
+    call_credit_mid = (call_sq[0] + call_sq[1]) / 2 - (call_lq[0] + call_lq[1]) / 2
+    put_credit_sub = max(round((put_credit_nat + put_credit_mid) / 2, 2), put_credit_mid)
+    call_credit_sub = max(round((call_credit_nat + call_credit_mid) / 2, 2), call_credit_mid)
+    total_credit = put_credit_sub + call_credit_sub
+
+    put_width = abs(short_put["strike"] - long_put["strike"])
+    call_width = abs(short_call["strike"] - long_call["strike"])
+    worst_width = max(put_width, call_width)
+    max_loss_per_contract = (worst_width - total_credit) * 100
+    if max_loss_per_contract <= 0:
+        return {"status": "rejected", "reason": "invalid max loss for condor"}
+
+    max_loss_budget = min(settings.options_daily_stop_loss, max_loss_per_contract * settings.options_max_contracts)
+    contracts = max(1, min(int(max_loss_budget / max_loss_per_contract), settings.options_max_contracts))
+    vix_mult = get_vix_size_multiplier(signal.market_regime)
+    contracts = max(1, min(int(contracts * vix_mult), settings.options_max_contracts))
+
+    limit_credit = Decimal(str(round(total_credit, 2)))
+    max_profit = float(limit_credit) * 100 * contracts
+    max_loss = max_loss_per_contract * contracts
+
+    logger.info(
+        "Iron condor pre-flight: {} | put {}/{} | call {}/{} | credit=${:.2f} | {}x",
+        rec.symbol, short_put["occ_symbol"], long_put["occ_symbol"],
+        short_call["occ_symbol"], long_call["occ_symbol"], float(limit_credit), contracts,
+    )
+
+    try:
+        client.place_iron_condor(
+            short_put["occ_symbol"], long_put["occ_symbol"],
+            short_call["occ_symbol"], long_call["occ_symbol"],
+            contracts, limit_credit, dry_run=True,
+        )
+    except ValueError as e:
+        return {"status": "rejected", "reason": str(e)}
+
+    if dry_run:
+        return {
+            "status": "dry_run", "symbol": rec.symbol, "strategy": "IRON_CONDOR",
+            "short_put": short_put["occ_symbol"], "long_put": long_put["occ_symbol"],
+            "short_call": short_call["occ_symbol"], "long_call": long_call["occ_symbol"],
+            "contracts": contracts, "net_credit": float(limit_credit),
+            "max_profit": max_profit, "max_loss": max_loss,
+            "expiry": chain.get("expiry"), "dte": chain.get("dte"),
+        }
+
+    result = client.place_iron_condor(
+        short_put["occ_symbol"], long_put["occ_symbol"],
+        short_call["occ_symbol"], long_call["occ_symbol"],
+        contracts, limit_credit, dry_run=False,
+    )
+    order_id = None
+    order_response = result.get("order_response")
+    if order_response and hasattr(order_response, "order"):
+        obj = order_response.order
+        if hasattr(obj, "id"):
+            order_id = str(obj.id)
+
+    now_str = datetime.now(ET).isoformat()
+    conn = get_db()
+    try:
+        for s_type, s_leg, l_leg, credit, w in [
+            ("PUT_CREDIT", short_put, long_put, put_credit_sub, put_width),
+            ("CALL_CREDIT", short_call, long_call, call_credit_sub, call_width),
+        ]:
+            conn.execute(
+                """INSERT INTO spread_positions
+                   (symbol, spread_type, long_strike, short_strike, expiry, dte_at_open,
+                    contracts, debit_paid, max_profit, max_loss, target_exit_pct,
+                    opened_at, status, order_id, long_occ, short_occ, daily_session)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?)""",
+                (
+                    rec.symbol, s_type, l_leg["strike"], s_leg["strike"],
+                    chain.get("expiry", ""), chain.get("dte", 0),
+                    contracts, -credit,
+                    credit * 100 * contracts, (w - credit) * 100 * contracts,
+                    settings.options_profit_close_pct,
+                    now_str, order_id, l_leg["occ_symbol"], s_leg["occ_symbol"], "iron_condor",
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    increment_trade_count()
+    logger.info("Iron condor executed: {} x{} | order_id={}", rec.symbol, contracts, order_id)
+    return {
+        "status": "executed", "symbol": rec.symbol, "strategy": "IRON_CONDOR",
+        "short_put": short_put["occ_symbol"], "long_put": long_put["occ_symbol"],
+        "short_call": short_call["occ_symbol"], "long_call": long_call["occ_symbol"],
+        "contracts": contracts, "net_credit": float(limit_credit),
+        "max_profit": max_profit, "max_loss": max_loss,
+        "expiry": chain.get("expiry"), "dte": chain.get("dte"), "order_id": order_id,
+    }
 
 
 def execute_trade(
