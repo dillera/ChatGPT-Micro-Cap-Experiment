@@ -33,6 +33,8 @@ class MarketContext:
     vwap: float | None
     rsi_14: float | None        # 14-period RSI on 5-min bars
     vwap_slope: float | None    # fractional VWAP change over last 6 bars (30 min)
+    hma_trend: str = "FLAT"          # RISING, FALLING, FLAT — from HMA(20) on 5-min closes
+    alligator_state: str = "SLEEPING"  # EATING_UP, EATING_DOWN, SLEEPING
 
 
 def fetch_market_context(symbol: str = "SPY") -> MarketContext:
@@ -98,9 +100,11 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
 
     rsi_14 = _compute_rsi(bars_today["Close"]) if not bars_today.empty else None
     vwap_slope = _compute_vwap_slope(bars_today) if not bars_today.empty else None
+    hma_trend = _compute_hma_trend(bars_today["Close"]) if not bars_today.empty else "FLAT"
+    alligator_state = _compute_alligator_state(bars_today["Close"]) if not bars_today.empty else "SLEEPING"
 
     logger.info(
-        "Market context: {} @ ${:.2f} | VIX={:.1f} ({}) | ORB [{} - {}] | {} | VWAP={} | RSI={} | slope={}",
+        "Market context: {} @ ${:.2f} | VIX={:.1f} ({}) | ORB [{} - {}] | {} | VWAP={} | RSI={} | slope={} | HMA={} | Alligator={}",
         symbol, underlying_price, vix, regime,
         f"${orb_low:.2f}" if orb_low else "N/A",
         f"${orb_high:.2f}" if orb_high else "N/A",
@@ -108,6 +112,8 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
         f"${vwap:.2f}" if vwap else "N/A",
         f"{rsi_14:.1f}" if rsi_14 is not None else "N/A",
         f"{vwap_slope:.4f}" if vwap_slope is not None else "N/A",
+        hma_trend,
+        alligator_state,
     )
 
     return MarketContext(
@@ -126,6 +132,8 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
         vwap=vwap,
         rsi_14=rsi_14,
         vwap_slope=vwap_slope,
+        hma_trend=hma_trend,
+        alligator_state=alligator_state,
     )
 
 
@@ -249,6 +257,77 @@ def _compute_vwap_slope(bars_today: pd.DataFrame, n_bars: int = 6) -> float | No
         return (current_vwap - past_vwap) / past_vwap
     except Exception:
         return None
+
+
+def _wma(series: pd.Series, period: int) -> pd.Series:
+    """Weighted moving average with linearly increasing weights."""
+    weights = pd.Series(range(1, period + 1), dtype=float)
+    return series.rolling(period).apply(
+        lambda x: float((x * weights.values[:len(x)]).sum() / weights.values[:len(x)].sum()),
+        raw=True,
+    )
+
+
+def _compute_hma(closes: pd.Series, period: int = 20) -> pd.Series | None:
+    """Hull Moving Average: WMA(2·WMA(n/2) − WMA(n), √n).
+
+    Returns a Series aligned to closes, or None if insufficient data.
+    """
+    sqrt_p = max(2, int(period ** 0.5))
+    half = max(2, period // 2)
+    min_bars = period + sqrt_p
+    if closes is None or len(closes) < min_bars:
+        return None
+    try:
+        raw = 2 * _wma(closes, half) - _wma(closes, period)
+        return _wma(raw, sqrt_p)
+    except Exception:
+        return None
+
+
+def _compute_hma_trend(closes: pd.Series, period: int = 20) -> str:
+    """Return RISING, FALLING, or FLAT based on the last two HMA values."""
+    hma = _compute_hma(closes, period)
+    if hma is None:
+        return "FLAT"
+    valid = hma.dropna()
+    if len(valid) < 2:
+        return "FLAT"
+    prev, curr = float(valid.iloc[-2]), float(valid.iloc[-1])
+    threshold = abs(curr) * 0.00005  # 0.005% noise filter
+    if curr > prev + threshold:
+        return "RISING"
+    if curr < prev - threshold:
+        return "FALLING"
+    return "FLAT"
+
+
+def _compute_alligator_state(closes: pd.Series) -> str:
+    """Bill Williams Alligator: classify market as EATING_UP, EATING_DOWN, or SLEEPING.
+
+    Uses unshifted SMMA lines — shifts are display offsets, not relevant for signal logic.
+    Jaw = SMMA(13), Teeth = SMMA(8), Lips = SMMA(5).
+    EATING_UP:   lips > teeth > jaw (all lines fanning upward)
+    EATING_DOWN: lips < teeth < jaw (all lines fanning downward)
+    SLEEPING:    lines tangled or neutral
+    """
+    if closes is None or len(closes) < 13:
+        return "SLEEPING"
+    try:
+        def smma(s: pd.Series, n: int) -> float:
+            return float(s.ewm(alpha=1.0 / n, min_periods=n, adjust=False).mean().iloc[-1])
+
+        jaw = smma(closes, 13)
+        teeth = smma(closes, 8)
+        lips = smma(closes, 5)
+
+        if lips > teeth > jaw:
+            return "EATING_UP"
+        if lips < teeth < jaw:
+            return "EATING_DOWN"
+        return "SLEEPING"
+    except Exception:
+        return "SLEEPING"
 
 
 def select_symbol_for_today(universe: list[str]) -> str:

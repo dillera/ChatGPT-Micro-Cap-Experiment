@@ -194,24 +194,41 @@ def run_options_cycle(window: str, dry_run: bool = True) -> dict:
             evaluate_iron_condor_signal,
             evaluate_credit_spread_signal,
         )
-        signal = evaluate_signal_for_window(
+        from src.hma_alligator_strategy import evaluate_hma_alligator_signal
+        from src.arbiter import arbitrate
+
+        # Stage 11: evaluate ALL strategies (not cascade) — let the arbiter decide
+        candidate_signals = []
+        debit_sig = evaluate_signal_for_window(
             ctx, window,
             trades_today=daily_state.trades_today,
             max_trades=daily_state.max_trades,
             config=settings,
         )
-        if signal is None:
-            logger.info("No debit signal for {} window — trying iron condor", window)
-            signal = evaluate_iron_condor_signal(ctx, settings)
-        if signal is None:
-            logger.info("No condor signal — trying credit spread fallback", )
-            signal = evaluate_credit_spread_signal(ctx, settings)
+        if debit_sig:
+            candidate_signals.append(debit_sig)
+
+        condor_sig = evaluate_iron_condor_signal(ctx, settings)
+        if condor_sig:
+            candidate_signals.append(condor_sig)
+
+        credit_sig = evaluate_credit_spread_signal(ctx, settings)
+        if credit_sig:
+            candidate_signals.append(credit_sig)
+
+        hma_sig = evaluate_hma_alligator_signal(ctx, settings)
+        if hma_sig:
+            candidate_signals.append(hma_sig)
+
+        arb = arbitrate(candidate_signals)
+        signal = arb.winner
+        result["arbiter_scores"] = arb.all_scores
 
         result["signal"] = signal.__dict__ if signal else None
 
         if signal is None:
             result["status"] = "skipped"
-            result["skip_reason"] = f"no signal for {window} window"
+            result["skip_reason"] = arb.rejection_reason or f"no signal for {window} window"
             write_run_log(result)
             return result
 
@@ -233,9 +250,26 @@ def run_options_cycle(window: str, dry_run: bool = True) -> dict:
             max_trades=daily_state.max_trades,
             buying_power=buying_power,
         )
+        def _rec_dict(rec) -> dict:
+            return {
+                "action": rec.action,
+                "symbol": rec.symbol,
+                "confidence": rec.confidence,
+                "reasoning": rec.reasoning,
+                "spread_width": rec.spread_width,
+                "entry_window": rec.entry_window,
+            }
+
+        bull_recs = consensus.bull_analysis.recommendations
+        bear_recs = consensus.bear_analysis.recommendations
         result["consensus"] = {
             "approved": len(consensus.approved_trades),
             "disagreed": consensus.disagreed,
+            "bull_assessment": consensus.bull_analysis.market_assessment,
+            "bear_assessment": consensus.bear_analysis.market_assessment,
+            "bull_recommendation": _rec_dict(bull_recs[0]) if bull_recs else None,
+            "bear_recommendation": _rec_dict(bear_recs[0]) if bear_recs else None,
+            "approved_trade": _rec_dict(consensus.approved_trades[0]) if consensus.approved_trades else None,
         }
 
         if not consensus.approved_trades:

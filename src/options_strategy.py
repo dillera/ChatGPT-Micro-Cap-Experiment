@@ -398,11 +398,56 @@ def get_vix_size_multiplier(market_regime: str, config=None) -> float:
     return config.vix_size_normal
 
 
+def compute_implied_move_otm_pct(
+    atm_call_quotes: tuple[float, float],
+    atm_put_quotes: tuple[float, float],
+    underlying_price: float,
+    floor_pct: float = 0.003,
+    ceiling_pct: float = 0.030,
+) -> float:
+    """Compute IV-implied OTM % for condor short strikes from ATM straddle price.
+
+    The ATM straddle mid ≈ market's expected 1-sigma daily move in dollar terms.
+    Dividing by underlying price converts it to a fraction suitable as an OTM offset.
+
+    Args:
+        atm_call_quotes: (bid, ask) for the ATM call.
+        atm_put_quotes:  (bid, ask) for the ATM put.
+        underlying_price: Current price of the underlying.
+        floor_pct:  Minimum OTM fraction (default 0.3%) — protects against stale/thin quotes.
+        ceiling_pct: Maximum OTM fraction (default 3.0%) — caps overly wide placement.
+
+    Returns:
+        OTM fraction clipped to [floor_pct, ceiling_pct]. Falls back to floor_pct
+        if quotes are zero or underlying_price is invalid.
+    """
+    if underlying_price <= 0:
+        return floor_pct
+
+    call_mid = (atm_call_quotes[0] + atm_call_quotes[1]) / 2
+    put_mid = (atm_put_quotes[0] + atm_put_quotes[1]) / 2
+    straddle_mid = call_mid + put_mid
+
+    if straddle_mid <= 0:
+        logger.warning("IV-implied move: straddle mid is zero — using floor {:.1%}", floor_pct)
+        return floor_pct
+
+    implied_pct = straddle_mid / underlying_price
+    clipped = max(floor_pct, min(implied_pct, ceiling_pct))
+
+    logger.info(
+        "IV-implied move: straddle_mid=${:.2f} → {:.2%} (raw={:.2%}, clipped=[{:.1%},{:.1%}])",
+        straddle_mid, clipped, implied_pct, floor_pct, ceiling_pct,
+    )
+    return clipped
+
+
 def evaluate_iron_condor_signal(ctx: MarketContext, config) -> StrategySignal | None:
     """Iron condor signal — sell OTM put spread + OTM call spread simultaneously.
 
-    Requires LOW_VOL regime AND NEUTRAL trend bias. Collects theta from both
-    sides of the market. Momentum filter rejects any strong directional trend.
+    Requires LOW_VOL regime AND NEUTRAL trend bias. Short strike placement uses
+    the ATM straddle-implied expected move (fetched at execution time in the
+    executor) rather than a fixed OTM percentage.
     """
     if ctx.market_regime != "LOW_VOL":
         logger.info(
@@ -425,7 +470,7 @@ def evaluate_iron_condor_signal(ctx: MarketContext, config) -> StrategySignal | 
 
     reason = (
         f"Iron condor: LOW_VOL (VIX={ctx.vix:.1f}) + NEUTRAL bias at ${ctx.underlying_price:.2f} "
-        f"— selling OTM put + call spreads {config.options_condor_otm_pct:.1%} OTM"
+        f"— short strikes placed at IV-implied expected move (fallback {config.options_condor_otm_pct:.1%})"
     )
     logger.info("Iron condor signal — {}", reason)
     return StrategySignal(

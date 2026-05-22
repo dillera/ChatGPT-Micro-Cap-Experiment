@@ -857,8 +857,28 @@ def execute_iron_condor_trade(
     if len(puts) < 2 or len(calls) < 2:
         return {"status": "rejected", "reason": "insufficient puts or calls in chain"}
 
-    otm = settings.options_condor_otm_pct
     width = settings.options_spread_width
+
+    # IV-derived OTM placement: fetch ATM call + put quotes to compute the
+    # straddle-implied expected move, then place short strikes just outside it.
+    from src.options_strategy import compute_implied_move_otm_pct
+    atm_call = sorted(calls, key=lambda s: abs(s["strike"] - underlying_price))[0]
+    atm_put = sorted(puts, key=lambda s: abs(s["strike"] - underlying_price))[0]
+    try:
+        atm_call_q, atm_put_q = client.get_spread_quotes(
+            atm_call["streamer_symbol"], atm_put["streamer_symbol"]
+        )
+        otm = compute_implied_move_otm_pct(
+            atm_call_quotes=atm_call_q,
+            atm_put_quotes=atm_put_q,
+            underlying_price=underlying_price,
+            floor_pct=0.003,
+            ceiling_pct=0.030,
+        )
+    except Exception as e:
+        logger.warning("IV-implied move fetch failed ({}), using config fallback {:.1%}",
+                       e, settings.options_condor_otm_pct)
+        otm = settings.options_condor_otm_pct
 
     short_put = sorted(puts, key=lambda s: abs(s["strike"] - underlying_price * (1 - otm)))[0]
     long_put = sorted(puts, key=lambda s: abs(s["strike"] - (short_put["strike"] - width)))[0]
@@ -902,9 +922,9 @@ def execute_iron_condor_trade(
     max_loss = max_loss_per_contract * contracts
 
     logger.info(
-        "Iron condor pre-flight: {} | put {}/{} | call {}/{} | credit=${:.2f} | {}x",
+        "Iron condor pre-flight: {} | put {}/{} | call {}/{} | credit=${:.2f} | {}x | otm={:.2%}",
         rec.symbol, short_put["occ_symbol"], long_put["occ_symbol"],
-        short_call["occ_symbol"], long_call["occ_symbol"], float(limit_credit), contracts,
+        short_call["occ_symbol"], long_call["occ_symbol"], float(limit_credit), contracts, otm,
     )
 
     try:
@@ -924,6 +944,7 @@ def execute_iron_condor_trade(
             "contracts": contracts, "net_credit": float(limit_credit),
             "max_profit": max_profit, "max_loss": max_loss,
             "expiry": chain.get("expiry"), "dte": chain.get("dte"),
+            "otm_pct_used": otm,
         }
 
     result = client.place_iron_condor(
@@ -965,7 +986,7 @@ def execute_iron_condor_trade(
         conn.close()
 
     increment_trade_count()
-    logger.info("Iron condor executed: {} x{} | order_id={}", rec.symbol, contracts, order_id)
+    logger.info("Iron condor executed: {} x{} | order_id={} | otm={:.2%}", rec.symbol, contracts, order_id, otm)
     return {
         "status": "executed", "symbol": rec.symbol, "strategy": "IRON_CONDOR",
         "short_put": short_put["occ_symbol"], "long_put": long_put["occ_symbol"],
@@ -973,6 +994,7 @@ def execute_iron_condor_trade(
         "contracts": contracts, "net_credit": float(limit_credit),
         "max_profit": max_profit, "max_loss": max_loss,
         "expiry": chain.get("expiry"), "dte": chain.get("dte"), "order_id": order_id,
+        "otm_pct_used": otm,
     }
 
 
