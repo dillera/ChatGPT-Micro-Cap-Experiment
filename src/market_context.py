@@ -35,6 +35,8 @@ class MarketContext:
     vwap_slope: float | None    # fractional VWAP change over last 6 bars (30 min)
     hma_trend: str = "FLAT"          # RISING, FALLING, FLAT — from HMA(20) on 5-min closes
     alligator_state: str = "SLEEPING"  # EATING_UP, EATING_DOWN, SLEEPING
+    macro_risk_day: bool = False     # True when a high-impact macro event is scheduled today (FMP)
+    macro_events: list = None        # List of event dicts from FMP economic calendar
 
 
 def fetch_market_context(symbol: str = "SPY") -> MarketContext:
@@ -103,6 +105,11 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
     hma_trend = _compute_hma_trend(bars_today["Close"]) if not bars_today.empty else "FLAT"
     alligator_state = _compute_alligator_state(bars_today["Close"]) if not bars_today.empty else "SLEEPING"
 
+    from src.fmp_calendar import fetch_macro_risk
+    macro = fetch_macro_risk()
+    macro_risk_day = macro.is_risk_day
+    macro_events = macro.events
+
     logger.info(
         "Market context: {} @ ${:.2f} | VIX={:.1f} ({}) | ORB [{} - {}] | {} | VWAP={} | RSI={} | slope={} | HMA={} | Alligator={}",
         symbol, underlying_price, vix, regime,
@@ -134,6 +141,8 @@ def fetch_market_context(symbol: str = "SPY") -> MarketContext:
         vwap_slope=vwap_slope,
         hma_trend=hma_trend,
         alligator_state=alligator_state,
+        macro_risk_day=macro_risk_day,
+        macro_events=macro_events,
     )
 
 

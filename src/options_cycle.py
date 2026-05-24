@@ -129,6 +129,19 @@ def run_options_cycle(window: str, dry_run: bool = True) -> dict:
             write_run_log(result)
             return result
 
+        # Stage 3b: macro risk gate (FMP economic calendar — no-op on free tier)
+        from src.fmp_calendar import fetch_macro_risk, macro_gate_reason
+        macro_risk = fetch_macro_risk()
+        if macro_risk.is_risk_day:
+            gate_reason = macro_gate_reason(macro_risk)
+            logger.warning("Macro gate: blocking premium-selling strategies — {}", gate_reason)
+            # Stored on result so cycle logic below can consult it
+        result["macro_risk"] = {
+            "is_risk_day": macro_risk.is_risk_day,
+            "events": macro_risk.events,
+            "source": macro_risk.source,
+        }
+
         # Stage 4: account sync
         snapshot = client.get_account_snapshot()
         buying_power = snapshot.buying_power
@@ -208,13 +221,23 @@ def run_options_cycle(window: str, dry_run: bool = True) -> dict:
         if debit_sig:
             candidate_signals.append(debit_sig)
 
+        # On macro-risk days (FOMC/CPI/NFP etc.) skip premium-selling strategies.
+        # Directional debit spreads and HMA trend-continuation are still allowed.
+        is_macro_risk = result.get("macro_risk", {}).get("is_risk_day", False)
+
         condor_sig = evaluate_iron_condor_signal(ctx, settings)
         if condor_sig:
-            candidate_signals.append(condor_sig)
+            if is_macro_risk:
+                logger.info("Macro gate: suppressing IRON_CONDOR signal")
+            else:
+                candidate_signals.append(condor_sig)
 
         credit_sig = evaluate_credit_spread_signal(ctx, settings)
         if credit_sig:
-            candidate_signals.append(credit_sig)
+            if is_macro_risk:
+                logger.info("Macro gate: suppressing {} signal", credit_sig.strategy)
+            else:
+                candidate_signals.append(credit_sig)
 
         hma_sig = evaluate_hma_alligator_signal(ctx, settings)
         if hma_sig:

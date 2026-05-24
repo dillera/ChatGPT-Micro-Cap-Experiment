@@ -22,12 +22,47 @@ class Settings(BaseSettings):
     # LLM API keys — both models routed through OpenRouter
     openrouter_api_key: str = ""
 
+    # Financial Modeling Prep — economic calendar macro gate
+    # Free tier: real-time quotes only.
+    # Upgrade to starter (~$19/mo) to unlock economic_calendar endpoint.
+    fmp_api_key: str = ""
+    fmp_base_url: str = "https://financialmodelingprep.com/stable"
+    # High-impact event names that block new trades when scheduled today.
+    # Checked against the economic_calendar "event" field (case-insensitive substring).
+    fmp_block_events: list[str] = [
+        "FOMC", "Federal Open Market Committee",
+        "CPI", "Consumer Price Index",
+        "NFP", "Nonfarm Payroll", "Non-Farm Payroll",
+        "PCE", "Personal Consumption Expenditure",
+        "GDP", "Gross Domestic Product",
+        "JOLTS", "PPI", "Producer Price Index",
+        "Fed Chair", "Powell",
+    ]
+    # Impact filter — only block on "High" impact events (FMP field: "impact")
+    fmp_min_impact: str = "High"
+
     # Database
     db_path: str = str(DATA_DIR / "trading_bot.db")
 
-    # Consensus engine (overridable via OPENAI_MODEL / ANTHROPIC_MODEL env vars)
-    openai_model: str = "openai/gpt-4o-mini"
-    anthropic_model: str = "anthropic/claude-sonnet-4-6"
+    # Consensus engine — bull and bear models, both routed through OpenRouter.
+    # Overridable via BULL_MODEL / BEAR_MODEL env vars.
+    # Defaults: Qwen3.5-Flash (bull) + Kimi K2.6 (bear) — cheap, capable, fast.
+    # Fallback options: openai/gpt-4o-mini, anthropic/claude-sonnet-4-6
+    bull_model: str = "qwen/qwen3.5-flash-02-23"
+    bear_model: str = "moonshotai/kimi-k2.6"
+
+    # Legacy aliases — kept so existing .env files with OPENAI_MODEL / ANTHROPIC_MODEL
+    # still work without changes.
+    openai_model: str = ""    # if set, overrides bull_model
+    anthropic_model: str = "" # if set, overrides bear_model
+
+    @property
+    def resolved_bull_model(self) -> str:
+        return self.openai_model or self.bull_model
+
+    @property
+    def resolved_bear_model(self) -> str:
+        return self.anthropic_model or self.bear_model
     consensus_temperature: float = 0.3
     consensus_max_tokens: int = 8000
     min_confidence: float = 0.5
